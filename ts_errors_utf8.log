@@ -1,0 +1,21 @@
+﻿composables/useApi.ts(7,5): error TS2322: Type '{}' is not assignable to type 'string'.
+nuxt.config.ts(26,5): error TS2353: Object literal may only specify known properties, and 'primary' does not exist in type 'Partial<ModuleOptions>'.
+pages/index.vue(113,7): error TS2451: Cannot redeclare block-scoped variable 'authStore'.
+pages/index.vue(119,28): error TS2345: Argument of type 'void' is not assignable to parameter of type 'Promise<unknown>'.
+pages/index.vue(130,7): error TS2451: Cannot redeclare block-scoped variable 'authStore'.
+store/contacts.ts(55,25): error TS18046: 'response' is of type 'unknown'.
+store/contacts.ts(56,22): error TS18046: 'response' is of type 'unknown'.
+store/messages.ts(25,33): error TS2769: No overload matches this call.
+  Overload 1 of 3, '(id: "messages", options: Omit<DefineStoreOptions<"messages", { conversations: Conversation[]; messages: Message[]; activeConversation: Conversation | null; activeMessages: Message[]; loading: boolean; newMessageCount: number; }, _GettersTree<...>, { ...; }>, "id">): StoreDefinition<...>', gave the following error.
+    Type '(state: any, getters: any) => (contactStore: any) => any' is not assignable to type '(() => any) | ((state: { conversations: { id: string | number; contact_id: string | number; last_message?: { id: string | number; conversation_id: string | number; contact_id: string | number; ... 5 more ...; created_at: string; } | undefined; unread_count: number; status: "active" | "closed"; updated_at: string; cr...'.
+      Type '(state: any, getters: any) => (contactStore: any) => any' is not assignable to type '() => any'.
+        Target signature provides too few arguments. Expected 2 or more, but got 0.
+  Overload 2 of 3, '(id: "messages", storeSetup: (helpers: SetupStoreHelpers) => unknown, options?: DefineSetupStoreOptions<"messages", Pick<unknown, never>, Pick<unknown, never>, Pick<unknown, never>> | undefined): StoreDefinition<...>', gave the following error.
+    Object literal may only specify known properties, and 'state' does not exist in type '(helpers: SetupStoreHelpers) => unknown'.
+store/messages.ts(47,28): error TS7006: Parameter 'state' implicitly has an 'any' type.
+store/messages.ts(47,35): error TS7006: Parameter 'getters' implicitly has an 'any' type.
+store/messages.ts(66,30): error TS18046: 'response' is of type 'unknown'.
+store/messages.ts(84,31): error TS18046: 'response' is of type 'unknown'.
+store/messages.ts(96,36): error TS2339: Property 'getConversationMessages' does not exist on type '{ conversations: { id: string | number; contact_id: string | number; last_message?: { id: string | number; conversation_id: string | number; contact_id: string | number; direction: "inbound" | "outbound"; ... 4 more ...; created_at: string; } | undefined; unread_count: number; status: "active" | "closed"; updated_at...'.
+store/messages.ts(98,14): error TS2339: Property 'markConversationAsRead' does not exist on type '{ conversations: { id: string | number; contact_id: string | number; last_message?: { id: string | number; conversation_id: string | number; contact_id: string | number; direction: "inbound" | "outbound"; ... 4 more ...; created_at: string; } | undefined; unread_count: number; status: "active" | "closed"; updated_at...'.
+store/messages.ts(119,14): error TS2551: Property 'sortConversations' does not exist on type '{ conversations: { id: string | number; contact_id: string | number; last_message?: { id: string | number; conversation_id: string | number; contact_id: string | number; direction: "inbound" | "outbound"; ... 4 more ...; created_at: string; } | undefined; unread_count: number; status: "active" | "closed"; updated_at...'. Did you mean 'conversations'?
