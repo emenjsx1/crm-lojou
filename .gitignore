@@ -1,0 +1,9 @@
+node_modules/
+.nuxt/
+.output/
+dist/
+.DS_Store
+.env
+*.log
+out.txt
+package-lock.json
