@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 160" fill="none">
+  <!-- Circle dot above L -->
+  <circle cx="42" cy="14" r="12" stroke="#FF6EC7" stroke-width="5" fill="none"/>
+  <!-- Lojou text rendered as paths matching the brand font style -->
+  <text x="0" y="130" font-family="Georgia, 'Times New Roman', serif" font-size="128" font-weight="700" fill="#FF6EC7" letter-spacing="-2">Lojou</text>
+  <!-- Dot on j -->
+</svg>

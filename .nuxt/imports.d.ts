@@ -32,6 +32,7 @@ export { definePageMeta } from '../node_modules/nuxt/dist/pages/runtime/composab
 export { defineLazyHydrationComponent } from '#app/composables/lazy-hydration';
 export { useApi } from '../composables/useApi';
 export { useAuth } from '../composables/useAuth';
+export { useEvolution, EvoMessage } from '../composables/useEvolution';
 export { useMessages } from '../composables/useMessages';
 export { defineShortcuts } from '../node_modules/@nuxt/ui/dist/runtime/composables/defineShortcuts';
 export { useProvideButtonGroup, useInjectButtonGroup } from '../node_modules/@nuxt/ui/dist/runtime/composables/useButtonGroup';
@@ -46,7 +47,7 @@ export { useTimer } from '../node_modules/@nuxt/ui/dist/runtime/composables/useT
 export { useToast } from '../node_modules/@nuxt/ui/dist/runtime/composables/useToast';
 export { useUI } from '../node_modules/@nuxt/ui/dist/runtime/composables/useUI';
 export { useAuthStore } from '../stores/auth';
-export { useContactStore, Contact } from '../stores/contacts';
+export { useContactStore, Contact, FetchContactsParams } from '../stores/contacts';
 export { useMessageStore, Message } from '../stores/messages';
 export { useColorMode } from '../node_modules/@nuxtjs/color-mode/dist/runtime/composables';
 export { defineStore, acceptHMRUpdate, usePinia, storeToRefs } from '../node_modules/@pinia/nuxt/dist/runtime/composables';

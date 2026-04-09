@@ -22,9 +22,19 @@ export default defineNuxtConfig({
     fallback: 'light',
     classSuffix: ''
   },
-  ui: {
-    primary: '#FF009D',
-    gray: '#09090b'
+  // ui colors configured via tailwind.config.ts
+  postcss: {
+    plugins: {
+      tailwindcss: {},
+      autoprefixer: {}
+    }
+  },
+  devServer: {
+    port: 3000,
+    host: '0.0.0.0'
+  },
+  routeRules: {
+    '/proxy-lojou/**': { proxy: 'https://api.lojou.app/**' }
   },
   compatibilityDate: '2026-04-02'
 })

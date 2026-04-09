@@ -7,7 +7,6 @@
       <ClientOnly>
         <UButton color="gray" variant="ghost" :icon="colorMode.value === 'dark' ? 'i-heroicons-sun-20-solid' : 'i-heroicons-moon-20-solid'" @click="toggleColorMode" />
       </ClientOnly>
-      <UAvatar src="https://avatars.githubusercontent.com/u/1?v=4" alt="User" />
     </div>
   </header>
 </template>

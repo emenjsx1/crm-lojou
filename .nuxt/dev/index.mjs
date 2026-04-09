@@ -860,6 +860,12 @@ const _inlineRuntimeConfig = {
       "/__nuxt_error": {
         "cache": false
       },
+      "/proxy-lojou/**": {
+        "proxy": {
+          "to": "https://api.lojou.app/**",
+          "_proxyStripBase": "/proxy-lojou"
+        }
+      },
       "/_nuxt/builds/meta/**": {
         "headers": {
           "cache-control": "public, max-age=31536000, immutable"
@@ -2375,16 +2381,16 @@ _wH6JrtIxmaSoA8lCPWFnE9z4lQeXW6H5z3l5aymEQw
 const assets = {
   "/index.mjs": {
     "type": "text/javascript; charset=utf-8",
-    "etag": "\"1c449-Jt2xXE1dU1AqK30T60KyKJzVkig\"",
-    "mtime": "2026-04-02T07:27:09.869Z",
-    "size": 115785,
+    "etag": "\"1c4e2-SyrOREhTxiyT5hDknmIL9CTy99I\"",
+    "mtime": "2026-04-09T18:34:14.724Z",
+    "size": 115938,
     "path": "index.mjs"
   },
   "/index.mjs.map": {
     "type": "application/json",
-    "etag": "\"6d4e9-ZlU/dNpwdTzHGaebmw4HEcGok8Y\"",
-    "mtime": "2026-04-02T07:27:09.870Z",
-    "size": 447721,
+    "etag": "\"6d707-smRL9+oR1HVu0nm4qevK7klMtIo\"",
+    "mtime": "2026-04-09T18:34:14.725Z",
+    "size": 448263,
     "path": "index.mjs.map"
   }
 };
