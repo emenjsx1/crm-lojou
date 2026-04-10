@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 
-export const useAuthStore = defineStore('auth', {
+export const useAuthStore = defineStore('_legacy_auth', {
   state: () => ({
     isAuthenticated: false,
     user: null as { name: string; email: string; role: string } | null,

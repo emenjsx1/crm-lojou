@@ -22,7 +22,7 @@ export interface Conversation {
   created_at: string
 }
 
-export const useMessagesStore = defineStore('messages', {
+export const useMessagesStore = defineStore('_legacy_messages', {
   state: () => ({
     conversations: [] as Conversation[],
     messages: [] as Message[],

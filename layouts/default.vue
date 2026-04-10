@@ -18,9 +18,6 @@ import { onMounted } from 'vue'
 import { useAuthStore } from '~/stores/auth'
 import { useContactStore } from '~/stores/contacts'
 
-// Token interno da API Lojou — atualizar aqui quando o token expirar
-const DEFAULT_TOKEN = 'eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJpc3MiOiJodHRwczovL2FwcC5ibG9kYXF1ZS5jb20vYXBpL3ZlbmRvci9hdXRoL2xvZ2luIiwiaWF0IjoxNzczNDg1NDYwLCJleHAiOjE3ODY4MjEwNjAsIm5iZiI6MTc3MzQ4NTQ2MCwianRpIjoiTTdWY3lDTmZyUm1oZXBxTCIsInN1YiI6IjM5IiwicHJ2IjoiMjNiZDVjODk0OWY2MDBhZGIzOWU3MDFjNDAwODcyZGI3YTU5NzZmNyJ9.4bcQEBQ_NSBf6gDeq641uO_RMMIpUTkDgAbRjorXE6w'
-
 const authStore = useAuthStore()
 const contactStore = useContactStore()
 
@@ -32,18 +29,26 @@ const getCookie = (name: string) => {
   return null
 }
 
+const isLojouDomain = (): boolean => {
+  if (typeof window === 'undefined') return false
+  return window.location.hostname.includes('lojou.app')
+}
+
 onMounted(() => {
   if (typeof window === 'undefined') return
 
-  // Priority: cookie (produção) → localStorage → token padrão hardcoded
-  const token = getCookie('session_1')
-    || localStorage.getItem('lojou_session_1')
-    || DEFAULT_TOKEN
+  if (isLojouDomain()) {
+    // Em produção (lojou.app), usamos apenas o cookie de sessão seguro
+    const token = getCookie('session_1')
+    if (token) {
+      authStore.setToken(token)
+    }
+  } else {
+    // Em dev local, recuperamos da memória/Pinia (não salvamos em localStorage por segurança)
+    // Caso queira um token fixo para dev, pode ser definido aqui temporariamente se necessário
+  }
 
-  authStore.setToken(token)
-  localStorage.setItem('lojou_session_1', token)
-
-  // Pre-carregar contatos para todas as páginas (Messages, Dashboard, etc.)
+  // Pre-carregar contatos para as páginas que precisam
   if (contactStore.contacts.length === 0) {
     contactStore.fetchContacts({ is_paginate: 1, per_page: 100, page: 1 })
   }

@@ -12,7 +12,7 @@ export interface Contact {
   created_at: string
 }
 
-export const useContactsStore = defineStore('contacts', {
+export const useContactsStore = defineStore('_legacy_contacts', {
   state: () => ({
     contacts: [] as Contact[],
     filteredContacts: [] as Contact[],

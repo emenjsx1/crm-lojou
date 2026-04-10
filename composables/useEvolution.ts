@@ -103,21 +103,50 @@ export const useEvolution = () => {
   const fetchHistory = async (rawPhone: string, limit = 60): Promise<EvoMessage[]> => {
     const c = makeClient()
     if (!c) return []
-    const jid = formatPhone(rawPhone) + '@s.whatsapp.net'
-    try {
-      const res = await c.http.post(`/chat/findMessages/${c.instance}`, {
-        where: { key: { remoteJid: jid } },
-        page: 1,
-        offset: limit
-      })
-      const records = res.data?.messages?.records || res.data?.messages || res.data || []
-      return (Array.isArray(records) ? records : [])
-        .map(parseRecord)
-        .filter(Boolean) as EvoMessage[]
-    } catch (e) {
-      console.error('[EVO] fetchHistory error:', e)
-      return []
+    const phone = formatPhone(rawPhone)
+    const jid = phone + '@s.whatsapp.net'
+
+    // Tenta os endpoints conhecidos das diferentes versões da Evolution API
+    const attempts = [
+      // v2 / v2.1
+      () => c.http.post(`/message/findMessages/${c.instance}`, {
+        where: { key: { remoteJid: jid } }, page: 1, offset: limit
+      }),
+      // v2 alternativo
+      () => c.http.post(`/chat/findMessages/${c.instance}`, {
+        where: { key: { remoteJid: jid } }, page: 1, offset: limit
+      }),
+      // v1 (GET com query params)
+      () => c.http.get(`/message/findMessages/${c.instance}`, {
+        params: { remoteJid: jid, limit }
+      }),
+      // Fetch messages by number (algumas versões)
+      () => c.http.get(`/chat/messages/${c.instance}/${phone}`, {
+        params: { limit }
+      }),
+    ]
+
+    for (const attempt of attempts) {
+      try {
+        const res = await attempt()
+        const raw = res.data?.messages?.records
+          || res.data?.messages
+          || res.data?.data
+          || res.data
+          || []
+        if (Array.isArray(raw) && raw.length >= 0) {
+          return raw.map(parseRecord).filter(Boolean) as EvoMessage[]
+        }
+      } catch (e: any) {
+        // 404 = endpoint não existe nesta versão, tenta o próximo
+        if (e?.response?.status === 404 || e?.response?.status === 405) continue
+        // Outro erro (401, 500, etc.) — para aqui
+        console.warn('[EVO] fetchHistory falhou:', e?.response?.status, e?.message)
+        break
+      }
     }
+
+    return []
   }
 
   const sendText = async (rawPhone: string, text: string) => {
