@@ -22,6 +22,8 @@ export const useApi = () => {
       req.headers.Authorization = `Bearer ${token}`
     }
 
+    console.log(`[API CHECK] ${req.method?.toUpperCase()} ${req.url} | Token: ${token ? 'Ativo' : 'Ausente'}`)
+
     return req
   })
 
