@@ -1,153 +1,126 @@
 <template>
-  <div class="space-y-6 max-w-7xl mx-auto pb-10">
-    <div class="flex items-center justify-between mb-8">
-      <div>
-        <h2 class="text-2xl font-bold text-zinc-900 dark:text-white">Campanhas & Automações</h2>
-        <p class="text-sm text-zinc-500 mt-1">Gerencie fluxos automáticos de WhatsApp para produtores e afiliados da Lojou.</p>
+  <div class="space-y-8 max-w-7xl mx-auto pb-20">
+    <!-- Header with Stats -->
+    <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
+      <div class="md:col-span-2">
+        <h2 class="text-3xl font-extrabold text-zinc-900 dark:text-white tracking-tight">Campanhas & Histórico</h2>
+        <p class="text-sm text-zinc-500 mt-2">Acompanhe o desempenho das suas transmissões e automações de WhatsApp.</p>
       </div>
-      <button @click="openNewFlow" class="px-5 py-2.5 bg-[#FF009D] text-white font-medium text-sm rounded-lg hover:bg-[#D90085] transition-all flex items-center gap-2 shadow-lg shadow-[#FF009D]/20">
-        <Icon name="ph:plus-bold" /> Criar Fluxo
-      </button>
-    </div>
-
-    <!-- Modal: Create Flow -->
-    <div v-if="showFlowModal" class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm px-4">
-      <div class="bg-white dark:bg-[#09090b] w-full max-w-lg rounded-2xl border border-zinc-200 dark:border-zinc-800 shadow-xl overflow-hidden flex flex-col">
-        <div class="px-6 py-4 border-b border-zinc-200 dark:border-zinc-800 flex justify-between items-center">
-           <h3 class="font-bold text-lg text-zinc-900 dark:text-white">Criar Nova Automação</h3>
-           <button @click="showFlowModal = false" class="text-zinc-500 hover:text-zinc-800 dark:hover:text-white transition-colors">
-             <Icon name="ph:x-bold" class="w-5 h-5"/>
-           </button>
-        </div>
-        <div class="p-6 flex flex-col gap-5">
-           <!-- Flow Name -->
-           <div class="flex flex-col gap-2">
-             <label class="text-xs font-semibold text-zinc-700 dark:text-zinc-300">Nome do Fluxo</label>
-             <input v-model="newFlow.name" type="text" placeholder="Ex: Boas Vindas ao Produtor" class="w-full px-3 py-2 bg-zinc-50 dark:bg-zinc-900/50 border border-zinc-200 dark:border-zinc-800 rounded-lg text-sm text-zinc-700 dark:text-zinc-300 focus:outline-none focus:border-[#FF009D]" />
-           </div>
-
-           <!-- Trigger -->
-           <div class="flex flex-col gap-2">
-             <label class="text-xs font-semibold text-zinc-700 dark:text-zinc-300">Gatilho (Quando disparar?)</label>
-             <select v-model="newFlow.trigger" class="w-full px-3 py-2 bg-zinc-50 dark:bg-zinc-900/50 border border-zinc-200 dark:border-zinc-800 rounded-lg text-sm text-zinc-700 dark:text-zinc-300 focus:outline-none focus:border-[#FF009D]">
-               <option value="new_user">Após cadastro de Usuário (Produtor/Afiliado)</option>
-               <option value="first_sale">Quando fizer a primeira Venda</option>
-               <option value="withdrawal">Quando solicitar um Saque</option>
-               <option value="cron">CRON JOB (Agendamento Fixo)</option>
-             </select>
-           </div>
-           
-           <!-- Delay -->
-           <div class="flex flex-col gap-2">
-             <label class="text-xs font-semibold text-zinc-700 dark:text-zinc-300">Atraso antes de enviar (Delay)</label>
-             <div class="flex items-center gap-2">
-                <input v-model="newFlow.delayValue" type="number" min="0" placeholder="15" class="w-20 px-3 py-2 bg-zinc-50 dark:bg-zinc-900/50 border border-zinc-200 dark:border-zinc-800 rounded-lg text-sm text-zinc-700 dark:text-zinc-300 focus:outline-none focus:border-[#FF009D]" />
-                <select v-model="newFlow.delayUnit" class="w-32 px-3 py-2 bg-zinc-50 dark:bg-zinc-900/50 border border-zinc-200 dark:border-zinc-800 rounded-lg text-sm text-zinc-700 dark:text-zinc-300 focus:outline-none focus:border-[#FF009D]">
-                 <option value="min">Minutos</option>
-                 <option value="h">Horas</option>
-                 <option value="d">Dias</option>
-               </select>
-             </div>
-             <p class="text-[11px] text-zinc-400">Ex: 15 minutos após o cadastro → recebe mensagem de boas-vindas</p>
-           </div>
-
-           <!-- Message Template -->
-           <div class="flex flex-col gap-2">
-             <label class="text-xs font-semibold text-zinc-700 dark:text-zinc-300">Mensagem Template (WhatsApp)</label>
-             <textarea v-model="newFlow.message" rows="4" placeholder="Olá {{nome}}! Seja bem-vindo(a) à Lojou..." class="w-full px-3 py-2 bg-zinc-50 dark:bg-zinc-900/50 border border-zinc-200 dark:border-zinc-800 rounded-lg text-sm text-zinc-700 dark:text-zinc-300 focus:outline-none focus:border-[#FF009D] resize-none"></textarea>
-             <p class="text-[11px] text-zinc-400">Use <span class="font-mono bg-zinc-100 dark:bg-zinc-800 px-1 rounded">&#123;&#123;nome&#125;&#125;</span> para o nome do usuário</p>
-           </div>
-        </div>
-        <div class="px-6 py-4 bg-zinc-50 dark:bg-zinc-900/50 border-t border-zinc-200 dark:border-zinc-800 flex justify-end gap-3 rounded-b-2xl">
-          <button @click="showFlowModal = false" class="px-5 py-2 font-medium text-sm text-zinc-600 dark:text-zinc-400 border border-zinc-200 dark:border-zinc-800 rounded-lg hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors">Cancelar</button>
-          <button @click="saveFlow" :disabled="!newFlow.name || !newFlow.message" class="px-6 py-2 bg-[#FF009D] disabled:opacity-40 text-white font-medium text-sm rounded-lg flex items-center gap-2 hover:bg-[#D90085] transition-colors shadow-lg shadow-[#FF009D]/20">
-            <Icon name="ph:check-bold" class="w-4 h-4" /> Salvar e Ativar Fluxo
-          </button>
-        </div>
-      </div>
-    </div>
-
-    <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
       
-      <!-- Left: Active Triggers / Automations -->
-      <div class="lg:col-span-1 space-y-6">
-        <div class="bg-white dark:bg-[#09090b] border border-zinc-200 dark:border-zinc-800 rounded-2xl p-5 shadow-sm">
-           <h3 class="font-semibold text-zinc-900 dark:text-white mb-4 flex items-center gap-2">
-             <Icon name="ph:lightning-bold" class="text-amber-500" /> Gatilhos Ativos ({{ flows.filter(f => f.active).length }}/{{ flows.length }})
-           </h3>
-           <div class="flex flex-col gap-3">
-             <div v-for="flow in flows" :key="flow.id"
-                  class="p-4 border rounded-xl flex flex-col gap-3 relative overflow-hidden transition-all"
-                  :class="flow.active ? 'border-[#FF009D]/30 bg-[#FF009D]/5' : 'border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900/50'">
-               <div class="flex justify-between items-start gap-2">
-                 <div class="min-w-0">
-                   <h4 class="text-sm font-semibold truncate" :class="flow.active ? 'text-[#FF009D]' : 'text-zinc-900 dark:text-white'">{{ flow.name }}</h4>
-                   <p class="text-[11px] text-zinc-500 mt-0.5">{{ triggerLabel(flow.trigger) }} — Delay: {{ flow.delayValue }}{{ flow.delayUnit }}</p>
-                 </div>
-                 <!-- Toggle -->
-                 <button @click="flow.active = !flow.active" class="shrink-0 w-10 h-5 rounded-full transition-colors relative" :class="flow.active ? 'bg-emerald-500' : 'bg-zinc-300 dark:bg-zinc-700'">
-                   <div class="w-4 h-4 bg-white rounded-full absolute top-0.5 transition-all shadow-sm" :class="flow.active ? 'right-0.5' : 'left-0.5'"></div>
-                 </button>
-               </div>
-               <div class="flex items-center justify-between">
-                 <div class="flex items-center gap-3 text-xs font-medium text-zinc-500">
-                   <span class="flex items-center gap-1"><Icon name="ph:paper-plane-right-fill" class="text-[#FF009D]"/> {{ flow.sent }}</span>
-                 </div>
-                 <button @click="deleteFlow(flow.id)" class="text-zinc-400 hover:text-red-500 transition-colors">
-                   <Icon name="ph:trash-bold" class="w-4 h-4" />
-                 </button>
-               </div>
-             </div>
-
-             <div v-if="flows.length === 0" class="py-8 text-center text-zinc-500">
-               <Icon name="ph:lightning-slash" class="w-8 h-8 mx-auto opacity-20 mb-2" />
-               <p class="text-sm">Nenhum fluxo criado. Clique em "Criar Fluxo".</p>
-             </div>
-           </div>
+      <!-- Quick Stats Card -->
+      <div class="bg-[#FF009D]/5 border border-[#FF009D]/20 rounded-2xl p-4 flex items-center gap-4">
+        <div class="w-12 h-12 rounded-xl bg-[#FF009D] flex items-center justify-center shadow-lg shadow-[#FF009D]/20">
+          <Icon name="ph:paper-plane-tilt-fill" class="w-6 h-6 text-white" />
+        </div>
+        <div>
+          <p class="text-[10px] font-bold uppercase tracking-wider text-[#FF009D]">Total de Envios</p>
+          <p class="text-2xl font-black text-zinc-900 dark:text-white">{{ totalSent }}</p>
         </div>
       </div>
 
-      <!-- Right: Campaign History -->
-      <div class="lg:col-span-2">
-        <div class="bg-white dark:bg-[#09090b] border border-zinc-200 dark:border-zinc-800 rounded-2xl overflow-hidden shadow-sm">
-          <div class="px-6 py-5 border-b border-zinc-200 dark:border-zinc-800 flex items-center justify-between">
-            <h3 class="font-semibold text-zinc-900 dark:text-white">Histórico de Disparos</h3>
+      <div class="bg-emerald-500/5 border border-emerald-500/20 rounded-2xl p-4 flex items-center gap-4">
+        <div class="w-12 h-12 rounded-xl bg-emerald-500 flex items-center justify-center shadow-lg shadow-emerald-500/20">
+          <Icon name="ph:check-circle-fill" class="w-6 h-6 text-white" />
+        </div>
+        <div>
+          <p class="text-[10px] font-bold uppercase tracking-wider text-emerald-600">Taxa de Sucesso</p>
+          <p class="text-2xl font-black text-zinc-900 dark:text-white">98.2%</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="grid grid-cols-1 lg:grid-cols-4 gap-8">
+      <!-- Sidebar Actions -->
+      <div class="lg:col-span-1 space-y-6">
+        <div class="bg-white dark:bg-[#09090b] border border-zinc-200 dark:border-zinc-800 rounded-2xl p-6 shadow-sm">
+          <h3 class="font-bold text-zinc-900 dark:text-white mb-4 text-sm uppercase tracking-widest">Ações Rápidas</h3>
+          <div class="flex flex-col gap-3">
+            <NuxtLink to="/broadcast" class="w-full px-5 py-3 bg-[#FF009D] text-white font-bold text-sm rounded-xl hover:bg-[#D90085] transition-all flex items-center justify-center gap-2 shadow-lg shadow-[#FF009D]/20">
+              <Icon name="ph:broadcast-bold" class="w-5 h-5" /> Nova Transmissão
+            </NuxtLink>
+            <button @click="openNewFlow" class="w-full px-5 py-3 bg-zinc-100 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300 font-bold text-sm rounded-xl hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-all flex items-center justify-center gap-2">
+              <Icon name="ph:robot-bold" class="w-5 h-5" /> Criar Automação
+            </button>
+          </div>
+        </div>
+
+        <!-- Info Card -->
+        <div class="p-6 bg-gradient-to-br from-zinc-900 to-zinc-800 dark:from-zinc-100 dark:to-zinc-300 rounded-3xl text-white dark:text-zinc-950 shadow-xl overflow-hidden relative">
+          <Icon name="ph:shield-check-fill" class="absolute -right-4 -bottom-4 w-24 h-24 opacity-10" />
+          <h4 class="font-bold text-lg leading-tight">Privacidade & Segurança</h4>
+          <p class="text-xs mt-2 opacity-70">Suas transmissões seguem os protocolos de segurança da Evolution API para evitar bloqueios.</p>
+        </div>
+      </div>
+
+      <!-- Main History Table -->
+      <div class="lg:col-span-3">
+        <div class="bg-white dark:bg-[#09090b] border border-zinc-200 dark:border-zinc-800 rounded-3xl overflow-hidden shadow-sm">
+          <div class="px-8 py-6 border-b border-zinc-200 dark:border-zinc-800 flex items-center justify-between bg-zinc-50/50 dark:bg-zinc-900/20">
+            <h3 class="font-bold text-zinc-900 dark:text-white flex items-center gap-2">
+              <Icon name="ph:clock-history-bold" class="text-[#FF009D]" /> Histórico de Disparos
+            </h3>
+            <button @click="fetchBroadcasts" class="p-2 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-full transition-colors text-zinc-400">
+              <Icon name="ph:arrows-clockwise-bold" :class="loading ? 'animate-spin' : ''" />
+            </button>
           </div>
           
           <div class="overflow-x-auto">
             <table class="w-full text-left text-sm whitespace-nowrap">
-              <thead class="bg-zinc-50 dark:bg-zinc-900/50 text-zinc-500 dark:text-zinc-400 border-b border-zinc-200 dark:border-zinc-800">
+              <thead class="bg-zinc-50/80 dark:bg-zinc-900/50 text-zinc-500 border-b border-zinc-200 dark:border-zinc-800">
                 <tr>
-                  <th class="px-6 py-4 font-semibold text-xs tracking-wide">Título da Transmissão</th>
-                  <th class="px-6 py-4 font-semibold text-xs tracking-wide text-center">Destinatários</th>
-                  <th class="px-6 py-4 font-semibold text-xs tracking-wide text-center">Status</th>
-                  <th class="px-6 py-4 font-semibold text-xs tracking-wide text-center">Data/Hora</th>
-                  <th class="px-6 py-4 font-semibold text-xs tracking-wide text-center">Ações</th>
+                  <th class="px-8 py-5 font-bold text-[10px] uppercase tracking-widest text-zinc-400">Transmissão</th>
+                  <th class="px-8 py-5 font-bold text-[10px] uppercase tracking-widest text-zinc-400 text-center">Contatos</th>
+                  <th class="px-8 py-5 font-bold text-[10px] uppercase tracking-widest text-zinc-400 text-center">Status</th>
+                  <th class="px-8 py-5 font-bold text-[10px] uppercase tracking-widest text-zinc-400 text-center">Data do Envio</th>
+                  <th class="px-8 py-5 font-bold text-[10px] uppercase tracking-widest text-zinc-400 text-center">Ação</th>
                 </tr>
               </thead>
-              <tbody class="divide-y divide-zinc-100 dark:divide-zinc-800/80">
-                <tr v-for="b in broadcasts" :key="b.id" class="hover:bg-zinc-50/50 dark:hover:bg-zinc-900/40 transition-colors">
-                  <td class="px-6 py-4">
-                    <div class="font-medium text-zinc-900 dark:text-zinc-100">{{ b.name }}</div>
-                    <div class="text-[11px] text-zinc-500 truncate max-w-[200px]">{{ b.message }}</div>
+              <tbody class="divide-y divide-zinc-100 dark:divide-zinc-800/80 font-inter">
+                <tr v-for="b in broadcasts" :key="b.id" class="group hover:bg-zinc-50/50 dark:hover:bg-zinc-900/40 transition-all">
+                  <td class="px-8 py-6">
+                    <div class="font-bold text-zinc-900 dark:text-zinc-100 group-hover:text-[#FF009D] transition-colors">{{ b.name }}</div>
+                    <div class="text-[11px] text-zinc-500 truncate max-w-[250px] mt-1">{{ b.message }}</div>
                   </td>
-                  <td class="px-6 py-4 text-center text-zinc-600 dark:text-zinc-400 font-medium">{{ b.total_contacts }}</td>
-                  <td class="px-6 py-4 text-center">
-                    <span :class="[
-                      'inline-flex px-2.5 py-1 text-[11px] font-bold uppercase rounded-md tracking-wider',
-                      b.status === 'completed' ? 'bg-emerald-500/10 text-emerald-500' : 'bg-amber-500/10 text-amber-500'
-                    ]">{{ b.status === 'completed' ? 'Finalizado' : 'Enviando...' }}</span>
+                  <td class="px-8 py-6 text-center">
+                    <div class="flex flex-col items-center">
+                      <span class="font-black text-zinc-900 dark:text-white">{{ b.total_contacts }}</span>
+                      <span class="text-[9px] uppercase tracking-tighter text-zinc-400">Destinatários</span>
+                    </div>
                   </td>
-                  <td class="px-6 py-4 text-center text-xs text-zinc-500">
-                    {{ formatDate(b.created_at) }}
+                  <td class="px-8 py-6 text-center">
+                    <div class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-wider shadow-sm"
+                          :class="b.status === 'completed' ? 'bg-emerald-500/10 text-emerald-600 border border-emerald-500/20' : 'bg-amber-500/10 text-amber-600 border border-amber-500/20 animate-pulse'">
+                      <div class="w-1.5 h-1.5 rounded-full" :class="b.status === 'completed' ? 'bg-emerald-500' : 'bg-amber-500'"></div>
+                      {{ b.status === 'completed' ? 'Finalizado' : 'Enviando' }}
+                    </div>
                   </td>
-                  <td class="px-6 py-4 text-center">
-                    <button @click="deleteBroadcast(b.id)" class="text-xs text-red-500 hover:text-red-700 font-medium">Deletar</button>
+                  <td class="px-8 py-6 text-center">
+                    <div class="text-xs font-semibold text-zinc-600 dark:text-zinc-400">{{ formatDate(b.created_at).split(' ')[0] }}</div>
+                    <div class="text-[10px] text-zinc-400 mt-0.5">{{ formatDate(b.created_at).split(' ')[1] }}</div>
+                  </td>
+                  <td class="px-8 py-6 text-center">
+                    <button @click="deleteBroadcast(b.id)" class="w-9 h-9 flex items-center justify-center rounded-xl bg-red-500/5 text-red-500 hover:bg-red-500 hover:text-white transition-all">
+                      <Icon name="ph:trash-bold" class="w-4 h-4" />
+                    </button>
                   </td>
                 </tr>
+                
+                <!-- Zero State -->
                 <tr v-if="broadcasts.length === 0">
-                  <td colspan="5" class="px-6 py-10 text-center text-zinc-400 text-sm">
-                    {{ loading ? 'Carregando histórico...' : 'Nenhuma transmissão realizada ainda.' }}
+                  <td colspan="5" class="px-8 py-24 text-center">
+                    <div v-if="loading" class="flex flex-col items-center gap-3">
+                      <Icon name="ph:spinner-gap-bold" class="w-10 h-10 text-[#FF009D] animate-spin" />
+                      <p class="text-sm font-bold text-zinc-400 uppercase tracking-widest">Sincronizando com o Backend...</p>
+                    </div>
+                    <div v-else class="flex flex-col items-center gap-4">
+                      <div class="w-20 h-20 rounded-3xl bg-zinc-50 dark:bg-zinc-900/50 flex items-center justify-center">
+                        <Icon name="ph:clipboard-text-bold" class="w-10 h-10 text-zinc-200 dark:text-zinc-800" />
+                      </div>
+                      <div class="max-w-[200px]">
+                        <p class="text-sm font-bold text-zinc-900 dark:text-white">Nenhum histórico</p>
+                        <p class="text-xs text-zinc-500 mt-1">Suas transmissões aparecerão aqui assim que forem enviadas.</p>
+                      </div>
+                    </div>
                   </td>
                 </tr>
               </tbody>
@@ -155,19 +128,64 @@
           </div>
         </div>
       </div>
-      
+    </div>
+
+    <!-- Modal Mockup for Automation (Nice UI) -->
+    <div v-if="showFlowModal" class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-md px-4">
+      <div class="bg-white dark:bg-[#09090b] w-full max-w-xl rounded-[2.5rem] border border-zinc-200 dark:border-zinc-800 shadow-2xl overflow-hidden flex flex-col transform transition-all">
+        <div class="px-10 py-8 flex justify-between items-center">
+           <div>
+             <h3 class="font-black text-2xl text-zinc-900 dark:text-white tracking-tight">Nova Automação</h3>
+             <p class="text-sm text-zinc-500">Configure um robô para enviar mensagens automáticas.</p>
+           </div>
+           <button @click="showFlowModal = false" class="w-10 h-10 rounded-full bg-zinc-100 dark:bg-zinc-800 flex items-center justify-center text-zinc-500 hover:rotate-90 transition-all">
+             <Icon name="ph:x-bold" class="w-5 h-5"/>
+           </button>
+        </div>
+        
+        <div class="px-10 pb-10 space-y-6">
+           <div class="grid grid-cols-2 gap-4">
+             <div class="flex flex-col gap-2">
+               <label class="text-[10px] font-black text-zinc-400 uppercase tracking-widest">Nome do Fluxo</label>
+               <input v-model="newFlow.name" type="text" placeholder="Ex: Boas Vindas" class="w-full px-5 py-4 bg-zinc-50 dark:bg-zinc-900 border-none rounded-2xl text-sm focus:ring-2 ring-[#FF009D]/20 outline-none" />
+             </div>
+             <div class="flex flex-col gap-2">
+               <label class="text-[10px] font-black text-zinc-400 uppercase tracking-widest">Gatilho</label>
+               <select v-model="newFlow.trigger" class="w-full px-5 py-4 bg-zinc-50 dark:bg-zinc-900 border-none rounded-2xl text-sm focus:ring-2 ring-[#FF009D]/20 outline-none">
+                 <option value="new_user">Novo Cadastro</option>
+                 <option value="abandoned">Carrinho Abandonado</option>
+                 <option value="sale">Venda Realizada</option>
+               </select>
+             </div>
+           </div>
+
+           <div class="flex flex-col gap-2">
+             <label class="text-[10px] font-black text-zinc-400 uppercase tracking-widest">Template da Mensagem</label>
+             <textarea v-model="newFlow.message" rows="4" placeholder="Olá {{nome}}, seja bem-vindo à nossa plataforma..." class="w-full px-5 py-4 bg-zinc-50 dark:bg-zinc-900 border-none rounded-2xl text-sm focus:ring-2 ring-[#FF009D]/20 outline-none resize-none"></textarea>
+           </div>
+
+           <div class="pt-4 flex gap-3">
+             <button @click="showFlowModal = false" class="flex-1 px-8 py-4 font-bold text-sm text-zinc-500 bg-zinc-100 dark:bg-zinc-800 rounded-2xl hover:bg-zinc-200 transition-all">Descartar</button>
+             <button @click="showFlowModal = false" class="flex-[2] px-8 py-4 bg-[#FF009D] text-white font-black text-sm rounded-2xl shadow-lg shadow-[#FF009D]/25 hover:scale-[1.02] active:scale-95 transition-all">Ativar Automação</button>
+           </div>
+        </div>
+      </div>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 
 useHead({ title: 'Campanhas - Lojou Messaging' })
 
 const supabase = useSupabaseClient()
 const broadcasts = ref<any[]>([])
 const loading = ref(false)
+
+const totalSent = computed(() => {
+  return broadcasts.value.reduce((acc, b) => acc + (b.total_contacts || 0), 0)
+})
 
 const fetchBroadcasts = async () => {
   loading.value = true
@@ -191,12 +209,10 @@ onMounted(() => {
 })
 
 const formatDate = (dateStr: string) => {
-  return new Date(dateStr).toLocaleDateString('pt-BR', {
-    day: '2-digit',
-    month: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit'
-  })
+  const date = new Date(dateStr)
+  return date.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric' }) + 
+         ' ' + 
+         date.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
 }
 
 const deleteBroadcast = async (id: string) => {
@@ -210,11 +226,12 @@ const deleteBroadcast = async (id: string) => {
   }
 }
 
-// Flow state (for the modal UI only)
+// Flow state
 const showFlowModal = ref(false)
 const newFlow = ref({ name: '', trigger: 'new_user', delayValue: 15, delayUnit: 'min', message: '' })
 const openNewFlow = () => { showFlowModal.value = true }
-
 </script>
 
-
+<style scoped>
+.font-inter { font-family: 'Inter', sans-serif; }
+</style>
