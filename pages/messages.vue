@@ -4,6 +4,14 @@
     <div class="mb-4 flex items-center justify-between">
       <h2 class="text-xl font-semibold text-zinc-900 dark:text-white">Mensagens</h2>
       <div class="flex items-center gap-3">
+        <button 
+          @click="syncAll" 
+          :disabled="syncingAll"
+          class="flex items-center gap-2 px-3 py-1.5 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500 hover:text-white rounded-lg text-sm font-semibold transition-all disabled:opacity-50"
+        >
+          <Icon :name="syncingAll ? 'ph:spinner-gap-bold' : 'ph:arrows-clockwise-bold'" class="w-4 h-4" :class="{ 'animate-spin': syncingAll }" />
+          {{ syncingAll ? 'A sincronizar...' : 'Sincronizar Tudo' }}
+        </button>
         <label class="text-sm font-medium text-zinc-600 dark:text-zinc-400">Assinatura no WhatsApp:</label>
         <div class="relative">
           <Icon name="ph:pen-nib-bold" class="w-4 h-4 text-zinc-400 absolute left-3 top-1/2 -translate-y-1/2" />
@@ -115,6 +123,53 @@ const evo = useEvolution()
 const agentSignature = ref('')
 const activeContact = ref<any | null>(null)
 const sending = ref(false)
+const syncingAll = ref(false)
+
+const syncAll = async () => {
+  if (syncingAll.value) return
+  syncingAll.value = true
+  try {
+    const chats = await evo.fetchChats()
+    if (!chats.length) return
+
+    // Limitamos a sincronização dos últimos chats para não estoiar a API em massa
+    // Mas percorremos todos os JIDs retornados
+    for (const chat of chats) {
+      const jid = chat.id || chat.remoteJid
+      if (!jid || jid.includes('@g.us')) continue // Pular grupos se virem
+
+      const phone = jid.split('@')[0]
+      
+      // Tentar encontrar o contato no nosso store ou criar um local temporário
+      let contact = contactsStore.contacts.find(c => {
+        const cPhone = String(c.phone_number || c.phone || c.whatsapp || '').replace(/\D/g, '')
+        return cPhone.endsWith(phone) || phone.endsWith(cPhone)
+      })
+
+      if (!contact) {
+        contact = {
+          id: 'ext_' + phone,
+          phone_number: phone,
+          name: chat.name || phone,
+          full_name: chat.name || phone,
+        }
+      }
+
+      // Buscar histórico (últimas 40 mensagens de cada)
+      const history = await evo.fetchHistory(phone, 40)
+      if (history.length > 0) {
+        await messagesStore.syncFromEvolution(contact.id, history)
+        markContactAsMessaged(contact)
+      }
+    }
+    alert('Sincronização concluída com sucesso!')
+  } catch (err) {
+    console.error('[SYNC ALL]', err)
+    alert('Erro durante a sincronização parcial.')
+  } finally {
+    syncingAll.value = false
+  }
+}
 
 // Search
 const showSearchModal = ref(false)
@@ -182,7 +237,15 @@ if (typeof window !== 'undefined') {
 }
 
 const activeConversations = computed(() => {
-  return recentChats.value
+  return recentChats.value.map(contact => {
+    const contactMessages = messagesStore.getMessagesByContact(contact.id)
+    const lastMsg = contactMessages[contactMessages.length - 1]
+    return {
+      ...contact,
+      lastMessage: lastMsg?.content || '',
+      lastMessageTime: lastMsg?.timestamp || contact.created_at || new Date().toISOString()
+    }
+  })
 })
 
 // Mensagens do contacto activo — ordenadas
@@ -199,10 +262,13 @@ const selectContact = async (contact: any) => {
   const phone = contact.phone_number || contact.phone || contact.whatsapp
   if (!phone) return
 
-  // Carrega histórico da Evolution
+  // Primeiro carrega o que já temos no Supabase (offline/cache)
+  await messagesStore.fetchFromSupabase(contact.id)
+
+  // Depois sincroniza o histórico mais recente da Evolution
   const history = await evo.fetchHistory(phone)
   if (history.length > 0) {
-    messagesStore.syncFromEvolution(contact.id, history)
+    await messagesStore.syncFromEvolution(contact.id, history)
     markContactAsMessaged(contact)
   }
 

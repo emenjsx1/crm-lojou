@@ -30,9 +30,10 @@
           <div class="flex-1 min-w-0">
              <div class="flex justify-between items-start">
                <h4 class="font-medium text-sm text-zinc-900 dark:text-zinc-100 truncate pr-2 capitalize">{{ (contact.full_name || contact.firstname || contact.name || contact.phone_number || 'Sem nome').toLowerCase() }}</h4>
-               <span class="text-[10px] text-zinc-500 shrink-0">12:30</span>
+               <span class="text-[10px] text-zinc-500 shrink-0">{{ formatTime(contact.lastMessageTime) }}</span>
              </div>
-             <p class="text-xs text-zinc-500 truncate mt-0.5" v-if="contact.phone_number">{{ contact.phone_number }}</p>
+             <p class="text-xs text-zinc-500 truncate mt-0.5" v-if="contact.lastMessage">{{ contact.lastMessage }}</p>
+             <p class="text-xs text-zinc-500 truncate mt-0.5" v-else-if="contact.phone_number">{{ contact.phone_number }}</p>
              <p class="text-xs text-zinc-500 truncate mt-0.5" v-else>Clique para conversar...</p>
           </div>
         </div>
@@ -60,6 +61,17 @@ const emit = defineEmits<{
 }>()
 
 const searchQuery = ref('')
+
+const formatTime = (ts: string) => {
+  if (!ts) return ''
+  const d = new Date(ts)
+  if (isNaN(d.getTime())) return ''
+  const now = new Date()
+  if (d.toDateString() === now.toDateString()) {
+    return d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
+  }
+  return d.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })
+}
 
 const filteredContacts = computed(() => {
   if (!searchQuery.value) return props.contacts

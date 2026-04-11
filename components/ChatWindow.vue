@@ -25,87 +25,102 @@
       </div>
 
       <!-- Messages -->
-      <div ref="msgsContainer" class="flex-1 overflow-y-auto p-4 space-y-2">
+      <div ref="msgsContainer" class="flex-1 overflow-y-auto p-4 space-y-4">
         <div v-if="messages.length === 0" class="flex flex-col items-center justify-center h-full text-center text-zinc-400 gap-3">
           <Icon name="ph:chat-teardrop-dots" class="w-12 h-12 opacity-20" />
           <p class="text-sm">Sem mensagens. Envie a primeira!</p>
         </div>
 
-        <div v-for="msg in messages" :key="msg.id"
-          class="flex" :class="msg.is_outgoing ? 'justify-end' : 'justify-start'">
-          <div class="max-w-[72%] rounded-2xl shadow-sm overflow-hidden"
-            :class="[
-              msg.is_outgoing
-                ? 'bg-[#FF009D] text-white rounded-br-none'
-                : 'bg-white dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100 border border-zinc-200 dark:border-zinc-700 rounded-bl-none',
-              msg.status === 'error' ? '!bg-red-500 text-white' : ''
-            ]">
+        <template v-for="(msg, index) in groupedMessages" :key="'group-' + index">
+          <!-- Date Separator -->
+          <div v-if="msg.isNewDay" class="flex justify-center my-6">
+            <span class="px-3 py-1 bg-zinc-200 dark:bg-zinc-800 text-[10px] font-bold text-zinc-500 dark:text-zinc-400 rounded-full uppercase tracking-widest">
+              {{ formatDate(msg.timestamp) }}
+            </span>
+          </div>
 
-            <!-- Imagem -->
-            <div v-if="msg.type === 'image'" class="flex flex-col">
-              <img
-                :src="mediaSource(msg)"
-                class="w-full max-w-xs rounded-t-2xl object-cover cursor-pointer"
-                :class="msg.is_outgoing ? 'rounded-br-none' : 'rounded-bl-none'"
-                @click="openLightbox(mediaSource(msg))"
-                loading="lazy"
-              />
-              <div v-if="msg.caption || msg.content !== '[Imagem]'" class="px-3 py-1.5 text-sm">
-                {{ msg.caption || msg.content }}
-              </div>
-              <div class="px-3 pb-1.5 flex justify-end items-center gap-1 text-[10px] opacity-70">
-                <span>{{ formatTime(msg.timestamp) }}</span>
-                <StatusIcon v-if="msg.is_outgoing" :status="msg.status" />
-              </div>
-            </div>
+          <div class="flex" :class="msg.is_outgoing ? 'justify-end' : 'justify-start'">
+            <div class="max-w-[72%] rounded-2xl shadow-sm overflow-hidden transition-all hover:shadow-md"
+              :class="[
+                msg.is_outgoing
+                  ? 'bg-[#FF009D] text-white rounded-br-none'
+                  : 'bg-white dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100 border border-zinc-200 dark:border-zinc-700 rounded-bl-none',
+                msg.status === 'error' ? '!bg-red-500 text-white' : ''
+              ]">
 
-            <!-- Áudio -->
-            <div v-else-if="msg.type === 'audio'" class="px-3 py-2 flex flex-col gap-1 min-w-[200px]">
-              <audio controls class="w-full h-8 rounded" preload="metadata">
-                <source :src="mediaSource(msg)" :type="msg.mimeType || 'audio/ogg'" />
-              </audio>
-              <div class="flex justify-end items-center gap-1 text-[10px] opacity-70 mt-0.5">
-                <span>{{ formatTime(msg.timestamp) }}</span>
-                <StatusIcon v-if="msg.is_outgoing" :status="msg.status" />
+              <!-- Imagem -->
+              <div v-if="msg.type === 'image'" class="flex flex-col min-w-[200px]">
+                <img
+                  :src="mediaSource(msg)"
+                  class="w-full max-w-sm rounded-t-2xl object-cover cursor-pointer"
+                  @click="openLightbox(mediaSource(msg))"
+                  loading="lazy"
+                />
+                <div v-if="msg.caption || (msg.content && msg.content !== '[Imagem]' && msg.content !== '[Sticker]')" class="px-3 py-2 text-sm">
+                  {{ msg.caption || msg.content }}
+                </div>
+                <div class="px-3 pb-1.5 flex justify-end items-center gap-1.5 text-[10px] opacity-70">
+                  <span class="font-medium">{{ formatTime(msg.timestamp) }}</span>
+                  <StatusIcon v-if="msg.is_outgoing" :status="msg.status" />
+                </div>
               </div>
-            </div>
 
-            <!-- Vídeo -->
-            <div v-else-if="msg.type === 'video'" class="flex flex-col">
-              <video controls class="w-full max-w-xs rounded-t-2xl" :class="msg.is_outgoing ? 'rounded-br-none' : 'rounded-bl-none'">
-                <source :src="mediaSource(msg)" :type="msg.mimeType || 'video/mp4'" />
-              </video>
-              <div v-if="msg.caption" class="px-3 py-1.5 text-sm">{{ msg.caption }}</div>
-              <div class="px-3 pb-1.5 flex justify-end items-center gap-1 text-[10px] opacity-70">
-                <span>{{ formatTime(msg.timestamp) }}</span>
-                <StatusIcon v-if="msg.is_outgoing" :status="msg.status" />
+              <!-- Áudio -->
+              <div v-else-if="msg.type === 'audio'" class="px-3 py-3 flex flex-col gap-1.5 min-w-[240px]">
+                <div class="flex items-center gap-3">
+                   <div class="w-8 h-8 rounded-full bg-white/20 flex items-center justify-center shrink-0">
+                      <Icon name="ph:microphone-fill" class="w-4 h-4" />
+                   </div>
+                   <audio controls class="w-full h-8 rounded shrink-0" preload="metadata" style="filter: invert(0.9) hue-rotate(180deg)">
+                     <source :src="mediaSource(msg)" :type="msg.mimeType || 'audio/ogg'" />
+                   </audio>
+                </div>
+                <div class="flex justify-end items-center gap-1.5 text-[10px] opacity-70">
+                  <span class="font-medium">{{ formatTime(msg.timestamp) }}</span>
+                  <StatusIcon v-if="msg.is_outgoing" :status="msg.status" />
+                </div>
               </div>
-            </div>
 
-            <!-- Documento -->
-            <div v-else-if="msg.type === 'document'" class="px-4 py-3 flex items-center gap-3 min-w-[180px]">
-              <Icon name="ph:file-bold" class="w-8 h-8 shrink-0 opacity-80" />
-              <div class="flex-1 min-w-0">
-                <p class="text-sm font-medium truncate">{{ msg.content }}</p>
-                <a v-if="msg.mediaUrl" :href="msg.mediaUrl" target="_blank"
-                  class="text-[11px] underline opacity-80">Baixar</a>
+              <!-- Vídeo -->
+              <div v-else-if="msg.type === 'video'" class="flex flex-col min-w-[200px]">
+                <video controls class="w-full max-w-sm rounded-t-2xl">
+                  <source :src="mediaSource(msg)" :type="msg.mimeType || 'video/mp4'" />
+                </video>
+                <div v-if="msg.caption" class="px-3 py-2 text-sm">{{ msg.caption }}</div>
+                <div class="px-3 pb-1.5 flex justify-end items-center gap-1.5 text-[10px] opacity-70">
+                  <span class="font-medium">{{ formatTime(msg.timestamp) }}</span>
+                  <StatusIcon v-if="msg.is_outgoing" :status="msg.status" />
+                </div>
               </div>
-              <div class="flex flex-col items-end gap-0.5">
-                <span class="text-[10px] opacity-70">{{ formatTime(msg.timestamp) }}</span>
-                <StatusIcon v-if="msg.is_outgoing" :status="msg.status" />
-              </div>
-            </div>
 
-            <!-- Texto -->
-            <div v-else class="px-4 py-2.5">
-              <p class="text-sm leading-relaxed whitespace-pre-wrap">{{ msg.content }}</p>
-              <div class="flex justify-end items-center gap-1.5 mt-1 text-[10px] opacity-70">
-                <span>{{ formatTime(msg.timestamp) }}</span>
-                <StatusIcon v-if="msg.is_outgoing" :status="msg.status" />
+              <!-- Documento -->
+              <div v-else-if="msg.type === 'document'" class="px-4 py-3 flex items-center gap-4 min-w-[220px]">
+                <div class="w-10 h-10 rounded-xl bg-white/10 flex items-center justify-center shrink-0">
+                   <Icon name="ph:file-pdf-bold" v-if="msg.mimeType?.includes('pdf')" class="w-6 h-6" />
+                   <Icon name="ph:file-bold" v-else class="w-6 h-6" />
+                </div>
+                <div class="flex-1 min-w-0">
+                  <p class="text-sm font-semibold truncate">{{ msg.content }}</p>
+                  <a v-if="msg.mediaUrl || msg.mediaBase64" :href="mediaSource(msg)" target="_blank"
+                    class="text-[11px] underline opacity-80 decoration-dotted hover:opacity-100 transition-opacity">Visualizar / Baixar</a>
+                </div>
+                <div class="flex flex-col items-end gap-1 shrink-0">
+                  <span class="text-[10px] font-medium opacity-70">{{ formatTime(msg.timestamp) }}</span>
+                  <StatusIcon v-if="msg.is_outgoing" :status="msg.status" />
+                </div>
+              </div>
+
+              <!-- Texto -->
+              <div v-else class="px-4 py-3">
+                <p class="text-[13.5px] leading-relaxed whitespace-pre-wrap">{{ msg.content }}</p>
+                <div class="flex justify-end items-center gap-1.5 mt-1 text-[10px] opacity-75">
+                  <span class="font-medium">{{ formatTime(msg.timestamp) }}</span>
+                  <StatusIcon v-if="msg.is_outgoing" :status="msg.status" />
+                </div>
               </div>
             </div>
           </div>
-        </div>
+        </template>
       </div>
 
       <!-- Aviso sem número -->
@@ -289,6 +304,33 @@ const formatTime = (ts: string) => {
   if (isNaN(d.getTime())) return ''
   return d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
 }
+
+const formatDate = (ts: string) => {
+  const d = new Date(ts)
+  if (isNaN(d.getTime())) return ''
+  const now = new Date()
+  if (d.toDateString() === now.toDateString()) return 'Hoje'
+  const yesterday = new Date(now)
+  yesterday.setDate(now.getDate() - 1)
+  if (d.toDateString() === yesterday.toDateString()) return 'Ontem'
+  
+  return d.toLocaleDateString('pt-BR', { day: '2-digit', month: 'long', year: d.getFullYear() !== now.getFullYear() ? 'numeric' : undefined })
+}
+
+const groupedMessages = computed(() => {
+  if (!props.messages) return []
+  const result: (Message & { isNewDay?: boolean })[] = []
+  let lastDay = ''
+
+  props.messages.forEach((msg) => {
+    const day = new Date(msg.timestamp).toDateString()
+    const enrichedMsg = { ...msg, isNewDay: day !== lastDay }
+    result.push(enrichedMsg)
+    lastDay = day
+  })
+
+  return result
+})
 
 // Fonte de media: base64 tem prioridade sobre URL
 const mediaSource = (msg: Message) => {

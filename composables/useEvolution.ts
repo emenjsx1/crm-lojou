@@ -20,8 +20,17 @@ export const useEvolution = () => {
   // Número moçambicano: 9 dígitos começando por 8 → adiciona 258
   const formatPhone = (raw: string): string => {
     let d = raw.replace(/\D/g, '')
+    if (d.startsWith('00')) d = d.slice(2)
     if (d.startsWith('0')) d = d.slice(1)
-    if (d.length === 9) d = '258' + d
+    
+    // Se tiver 9 dígitos e não começar com 258, assume-se Moçambique (legado do código anterior)
+    // Mas se tiver 10 ou 11 e começar com 1, 2, 3, etc. (Brasil), a gente tenta manter
+    if (d.length === 9 && !d.startsWith('258')) {
+      // Se o usuário estiver em outro país, isso pode precisar de ajuste nas configurações
+      d = '258' + d
+    }
+    
+    // Se já tiver DDI (ex: 55 para Brasil), não mexe
     return d
   }
 
@@ -82,7 +91,13 @@ export const useEvolution = () => {
 
   const parseRecord = (r: any): EvoMessage | null => {
     if (!r?.key) return null
-    const msg = r.message || {}
+    let msg = r.message || {}
+    
+    // Handle nested message structures (ephemeral, view once, etc.)
+    if (msg.ephemeralMessage) msg = msg.ephemeralMessage.message || {}
+    if (msg.viewOnceMessage) msg = msg.viewOnceMessage.message || {}
+    if (msg.viewOnceMessageV2) msg = msg.viewOnceMessageV2.message || {}
+
     let type: EvoMessage['type'] = 'text'
     let content = ''
     let mediaBase64: string | undefined
@@ -91,9 +106,11 @@ export const useEvolution = () => {
     let caption: string | undefined
 
     if (msg.conversation) {
-      type = 'text'; content = msg.conversation
+      type = 'text'
+      content = msg.conversation
     } else if (msg.extendedTextMessage) {
-      type = 'text'; content = msg.extendedTextMessage.text || ''
+      type = 'text'
+      content = msg.extendedTextMessage.text || ''
     } else if (msg.imageMessage) {
       type = 'image'
       caption = msg.imageMessage.caption || ''
@@ -116,19 +133,39 @@ export const useEvolution = () => {
       mimeType = msg.videoMessage.mimetype || 'video/mp4'
     } else if (msg.documentMessage) {
       type = 'document'
-      content = msg.documentMessage.fileName || '[Documento]'
+      content = msg.documentMessage.fileName || msg.documentMessage.title || '[Documento]'
       mediaUrl = msg.documentMessage.url
       mimeType = msg.documentMessage.mimetype
+    } else if (msg.stickerMessage) {
+       // Support stickers as images for now
+       type = 'image'
+       content = '[Sticker]'
+       mediaUrl = msg.stickerMessage.url
+       mimeType = msg.stickerMessage.mimetype || 'image/webp'
+    } else if (msg.buttonsMessage || msg.templateMessage || msg.listMessage) {
+       // Text fallback for interactive messages
+       type = 'text'
+       content = (msg.buttonsMessage?.contentText || msg.templateMessage?.hydratedTemplate?.hydratedContentText || msg.listMessage?.description || '[Mensagem Interativa]')
     } else {
-      return null
+      // Last resort: check if there is any text-like property
+      const possibleText = msg.text || msg.caption || msg.description
+      if (possibleText) {
+        type = 'text'
+        content = possibleText
+      } else {
+        return null
+      }
     }
 
     return {
       evoId: r.key.id,
       remoteJid: r.key.remoteJid || '',
-      fromMe: !!r.key.fromMe,
-      content, type,
-      timestamp: r.messageTimestamp ? r.messageTimestamp * 1000 : Date.now(),
+      fromMe: Boolean(r.key.fromMe),
+      content, 
+      type,
+      timestamp: r.messageTimestamp 
+        ? (Number(r.messageTimestamp) > 1000000000000 ? Number(r.messageTimestamp) : Number(r.messageTimestamp) * 1000) 
+        : Date.now(),
       status: r.status || 'DELIVERY_ACK',
       mediaBase64, mediaUrl, mimeType, caption
     }
@@ -216,9 +253,22 @@ export const useEvolution = () => {
     }
   }
 
+  const fetchChats = async (): Promise<any[]> => {
+    const c = await makeClient()
+    if (!c) return []
+    try {
+      const res = await c.http.get(`/chat/fetchChats/${c.instance}`)
+      return Array.isArray(res.data) ? res.data : []
+    } catch (e) {
+      console.warn('[EVO] Erro ao buscar chats:', e)
+      return []
+    }
+  }
+
   return { 
     formatPhone, 
     fetchHistory, 
+    fetchChats,
     sendText, 
     sendMedia, 
     configureWebhook, 

@@ -1,5 +1,7 @@
 import { defineStore } from 'pinia'
 import type { EvoMessage } from '~/composables/useEvolution'
+// Supabase client handles auto-import in Nuxt, but we can be explicit if needed for linting
+// or use the global composable inside actions.
 
 export interface Message {
   id: string | number
@@ -63,13 +65,16 @@ export const useMessageStore = defineStore('messages', {
     },
 
     // Sincroniza mensagens vindas da Evolution (sem duplicados)
-    syncFromEvolution(contactId: number | string, evoMessages: EvoMessage[]) {
+    async syncFromEvolution(contactId: number | string, evoMessages: EvoMessage[]) {
+      const client = useSupabaseClient()
       const existingEvoIds = new Set(
         this.messages.map(m => m.evo_id).filter(Boolean)
       )
 
+      const toUpsert: any[] = []
+
       for (const em of evoMessages) {
-        // Já existe — skip
+        // Já existe — skip local
         if (em.evoId && existingEvoIds.has(em.evoId)) continue
 
         // Verifica se é uma mensagem optimista local que já foi confirmada
@@ -88,7 +93,7 @@ export const useMessageStore = defineStore('messages', {
           continue
         }
 
-        this.messages.push({
+        const msgObj: Message = {
           id: em.evoId,
           evo_id: em.evoId,
           contact_id: contactId,
@@ -101,8 +106,60 @@ export const useMessageStore = defineStore('messages', {
           mediaUrl: em.mediaUrl,
           mimeType: em.mimeType,
           caption: em.caption
-        })
+        }
+
+        this.messages.push(msgObj)
         existingEvoIds.add(em.evoId)
+
+        // Preparar para Supabase
+        toUpsert.push({
+          id: em.evoId,
+          contact_id: String(contactId),
+          content: em.content,
+          type: em.type,
+          is_outgoing: em.fromMe,
+          status: EVO_STATUS_MAP[em.status] || 'delivered',
+          timestamp: new Date(em.timestamp).toISOString(),
+          media_url: em.mediaUrl,
+          mime_type: em.mimeType,
+          caption: em.caption
+        })
+      }
+
+      // Bulk upsert para o Supabase
+      if (toUpsert.length > 0) {
+        await client.from('messages').upsert(toUpsert, { onConflict: 'id' })
+      }
+    },
+
+    async fetchFromSupabase(contactId: number | string) {
+      const client = useSupabaseClient()
+      const { data, error } = await client
+        .from('messages')
+        .select('*')
+        .eq('contact_id', String(contactId))
+        .order('timestamp', { ascending: true })
+
+      if (!error && data) {
+        // Merge with existing avoiding duplicates
+        const existingIds = new Set(this.messages.map(m => m.id))
+        data.forEach(m => {
+          if (!existingIds.has(m.id)) {
+            this.messages.push({
+              id: m.id,
+              evo_id: m.id,
+              contact_id: m.contact_id,
+              content: m.content || '',
+              status: m.status as any,
+              timestamp: m.timestamp,
+              is_outgoing: m.is_outgoing,
+              type: m.type as any,
+              mediaUrl: m.media_url,
+              mimeType: m.mime_type,
+              caption: m.caption
+            })
+          }
+        })
       }
     },
 
