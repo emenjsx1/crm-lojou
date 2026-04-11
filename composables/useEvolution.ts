@@ -177,12 +177,12 @@ export const useEvolution = () => {
     const phone = formatPhone(rawPhone)
     const jid = phone + '@s.whatsapp.net'
 
-    // Tentar múltiplos endpoints de busca de mensagens (compatibilidade entre v1 e v2)
+    // Tentar múltiplos formatos de query (compatibilidade V1/V2)
     const attempts = [
       () => c.http.post(`/message/findMessages/${c.instance}`, {
-        where: { key: { remoteJid: jid } }, limit: limit
+        where: { remoteJid: jid }, limit: limit
       }),
-      () => c.http.post(`/chat/findMessages/${c.instance}`, {
+      () => c.http.post(`/message/findMessages/${c.instance}`, {
         where: { key: { remoteJid: jid } }, limit: limit
       }),
       () => c.http.get(`/message/findMessages/${c.instance}`, {
@@ -193,20 +193,17 @@ export const useEvolution = () => {
     for (const attempt of attempts) {
       try {
         const res = await attempt()
-        // API v1: data.messages.records
-        // API v2: data.records ou data.messages
         const data = res.data
         const raw = data?.messages?.records || data?.messages || data?.data || data?.records || (Array.isArray(data) ? data : [])
         
         if (Array.isArray(raw) && raw.length > 0) {
           const parsed = raw.map(parseRecord).filter(Boolean) as EvoMessage[]
-          console.log(`[EVO] Encontradas ${parsed.length} mensagens para ${phone}`)
+          console.log(`[EVO] Sync para ${phone}: ${parsed.length} mensagens encontradas.`)
           return parsed
         }
       } catch (e: any) {
-        if (e?.response?.status === 404 || e?.response?.status === 405) continue
-        console.warn('[EVO] Falha em tentativa de fetchHistory:', e.message)
-        break
+        console.warn(`[EVO] Tentativa falhou para ${phone}:`, e.message)
+        continue
       }
     }
     return []
