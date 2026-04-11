@@ -177,13 +177,13 @@ export const useEvolution = () => {
     const phone = formatPhone(rawPhone)
     const jid = phone + '@s.whatsapp.net'
 
-    // Tentar múltiplos endpoints de busca de mensagens (compatibilidade entre versões)
+    // Tentar múltiplos endpoints de busca de mensagens (compatibilidade entre v1 e v2)
     const attempts = [
       () => c.http.post(`/message/findMessages/${c.instance}`, {
-        where: { key: { remoteJid: jid } }, page: 1, limit: limit
+        where: { key: { remoteJid: jid } }, limit: limit
       }),
       () => c.http.post(`/chat/findMessages/${c.instance}`, {
-        where: { key: { remoteJid: jid } }, page: 1, limit: limit
+        where: { key: { remoteJid: jid } }, limit: limit
       }),
       () => c.http.get(`/message/findMessages/${c.instance}`, {
         params: { remoteJid: jid, limit }
@@ -193,8 +193,12 @@ export const useEvolution = () => {
     for (const attempt of attempts) {
       try {
         const res = await attempt()
-        const raw = res.data?.messages?.records || res.data?.messages || res.data?.data || res.data || []
-        if (Array.isArray(raw)) {
+        // API v1: data.messages.records
+        // API v2: data.records ou data.messages
+        const data = res.data
+        const raw = data?.messages?.records || data?.messages || data?.data || data?.records || (Array.isArray(data) ? data : [])
+        
+        if (Array.isArray(raw) && raw.length > 0) {
           const parsed = raw.map(parseRecord).filter(Boolean) as EvoMessage[]
           console.log(`[EVO] Encontradas ${parsed.length} mensagens para ${phone}`)
           return parsed
@@ -261,8 +265,18 @@ export const useEvolution = () => {
     const c = await makeClient()
     if (!c) return []
     try {
-      const res = await c.http.get(`/chat/fetchChats/${c.instance}`)
-      return Array.isArray(res.data) ? res.data : []
+      // Tentar findChats (POST) que é o padrão v2 moderno
+      const res = await c.http.post(`/chat/findChats/${c.instance}`, {
+        where: {},
+        limit: 20
+      })
+      const data = res.data
+      const chats = data?.activeChats || data?.records || data?.chats || (Array.isArray(data) ? data : [])
+      if (Array.isArray(chats) && chats.length > 0) return chats
+
+      // Fallback para fetchChats (GET)
+      const resOld = await c.http.get(`/chat/fetchChats/${c.instance}`)
+      return Array.isArray(resOld.data) ? resOld.data : []
     } catch (e) {
       console.warn('[EVO] Erro ao buscar chats:', e)
       return []
