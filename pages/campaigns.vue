@@ -118,30 +118,37 @@
             <table class="w-full text-left text-sm whitespace-nowrap">
               <thead class="bg-zinc-50 dark:bg-zinc-900/50 text-zinc-500 dark:text-zinc-400 border-b border-zinc-200 dark:border-zinc-800">
                 <tr>
-                  <th class="px-6 py-4 font-semibold text-xs tracking-wide">Nome do Fluxo</th>
-                  <th class="px-6 py-4 font-semibold text-xs tracking-wide">Gatilho</th>
-                  <th class="px-6 py-4 font-semibold text-xs tracking-wide text-center">Enviados</th>
+                  <th class="px-6 py-4 font-semibold text-xs tracking-wide">Título da Transmissão</th>
+                  <th class="px-6 py-4 font-semibold text-xs tracking-wide text-center">Destinatários</th>
                   <th class="px-6 py-4 font-semibold text-xs tracking-wide text-center">Status</th>
-                  <th class="px-6 py-4 font-semibold text-xs tracking-wide text-center">Ação</th>
+                  <th class="px-6 py-4 font-semibold text-xs tracking-wide text-center">Data/Hora</th>
+                  <th class="px-6 py-4 font-semibold text-xs tracking-wide text-center">Ações</th>
                 </tr>
               </thead>
               <tbody class="divide-y divide-zinc-100 dark:divide-zinc-800/80">
-                <tr v-for="flow in flows" :key="'h' + flow.id" class="hover:bg-zinc-50/50 dark:hover:bg-zinc-900/40 transition-colors">
-                  <td class="px-6 py-4 font-medium text-zinc-900 dark:text-zinc-100">{{ flow.name }}</td>
-                  <td class="px-6 py-4 text-zinc-500 text-xs">{{ triggerLabel(flow.trigger) }}</td>
-                  <td class="px-6 py-4 text-center text-zinc-600 dark:text-zinc-400 font-medium">{{ flow.sent }}</td>
+                <tr v-for="b in broadcasts" :key="b.id" class="hover:bg-zinc-50/50 dark:hover:bg-zinc-900/40 transition-colors">
+                  <td class="px-6 py-4">
+                    <div class="font-medium text-zinc-900 dark:text-zinc-100">{{ b.name }}</div>
+                    <div class="text-[11px] text-zinc-500 truncate max-w-[200px]">{{ b.message }}</div>
+                  </td>
+                  <td class="px-6 py-4 text-center text-zinc-600 dark:text-zinc-400 font-medium">{{ b.total_contacts }}</td>
                   <td class="px-6 py-4 text-center">
                     <span :class="[
                       'inline-flex px-2.5 py-1 text-[11px] font-bold uppercase rounded-md tracking-wider',
-                      flow.active ? 'bg-emerald-500/10 text-emerald-500' : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-500'
-                    ]">{{ flow.active ? 'Ativo' : 'Pausado' }}</span>
+                      b.status === 'completed' ? 'bg-emerald-500/10 text-emerald-500' : 'bg-amber-500/10 text-amber-500'
+                    ]">{{ b.status === 'completed' ? 'Finalizado' : 'Enviando...' }}</span>
+                  </td>
+                  <td class="px-6 py-4 text-center text-xs text-zinc-500">
+                    {{ formatDate(b.created_at) }}
                   </td>
                   <td class="px-6 py-4 text-center">
-                    <button @click="deleteFlow(flow.id)" class="text-xs text-red-400 hover:text-red-600 font-medium">Eliminar</button>
+                    <button @click="deleteBroadcast(b.id)" class="text-xs text-red-500 hover:text-red-700 font-medium">Deletar</button>
                   </td>
                 </tr>
-                <tr v-if="flows.length === 0">
-                  <td colspan="5" class="px-6 py-10 text-center text-zinc-400 text-sm">Nenhum fluxo criado ainda.</td>
+                <tr v-if="broadcasts.length === 0">
+                  <td colspan="5" class="px-6 py-10 text-center text-zinc-400 text-sm">
+                    {{ loading ? 'Carregando histórico...' : 'Nenhuma transmissão realizada ainda.' }}
+                  </td>
                 </tr>
               </tbody>
             </table>
@@ -154,76 +161,60 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive } from 'vue'
+import { ref, onMounted } from 'vue'
 
 useHead({ title: 'Campanhas - Lojou Messaging' })
 
-interface Flow {
-  id: number
-  name: string
-  trigger: string
-  delayValue: number
-  delayUnit: string
-  message: string
-  active: boolean
-  sent: number
-  createdAt: string
+const supabase = useSupabaseClient()
+const broadcasts = ref<any[]>([])
+const loading = ref(false)
+
+const fetchBroadcasts = async () => {
+  loading.value = true
+  try {
+    const { data, error } = await supabase
+      .from('broadcasts')
+      .select('*')
+      .order('created_at', { ascending: false })
+    
+    if (error) throw error
+    broadcasts.value = data || []
+  } catch (e: any) {
+    console.error('Erro ao buscar transmissões:', e.message)
+  } finally {
+    loading.value = false
+  }
 }
 
-const showFlowModal = ref(false)
-
-const newFlow = reactive({
-  name: '',
-  trigger: 'new_user',
-  delayValue: 15,
-  delayUnit: 'min',
-  message: ''
+onMounted(() => {
+  fetchBroadcasts()
 })
 
-const flows = ref<Flow[]>([
-  { id: 1, name: 'Boas Vindas à Lojou', trigger: 'new_user', delayValue: 15, delayUnit: 'min', message: 'Olá {{nome}}! Seja bem-vindo(a) à Lojou!', active: true, sent: 4200, createdAt: new Date().toISOString() },
-  { id: 2, name: 'Primeira Venda Realizada!', trigger: 'first_sale', delayValue: 0, delayUnit: 'min', message: 'Parabéns pela sua primeira venda!', active: true, sent: 890, createdAt: new Date().toISOString() },
-  { id: 3, name: 'Solicitação de Saque', trigger: 'withdrawal', delayValue: 1, delayUnit: 'h', message: 'Seu saque está sendo processado...', active: false, sent: 320, createdAt: new Date().toISOString() },
-])
+const formatDate = (dateStr: string) => {
+  return new Date(dateStr).toLocaleDateString('pt-BR', {
+    day: '2-digit',
+    month: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit'
+  })
+}
 
-const triggerLabel = (trigger: string) => {
-  const labels: Record<string, string> = {
-    new_user: '🧑 Novo Cadastro',
-    first_sale: '💰 1ª Venda',
-    withdrawal: '💸 Saque',
-    cron: '⏰ CRON Job'
+const deleteBroadcast = async (id: string) => {
+  if (!confirm('Eliminar esta transmissão do histórico?')) return
+  try {
+    const { error } = await supabase.from('broadcasts').delete().eq('id', id)
+    if (error) throw error
+    broadcasts.value = broadcasts.value.filter(b => b.id !== id)
+  } catch (e: any) {
+    alert('Erro ao eliminar: ' + e.message)
   }
-  return labels[trigger] || trigger
 }
 
-const openNewFlow = () => {
-  newFlow.name = ''
-  newFlow.trigger = 'new_user'
-  newFlow.delayValue = 15
-  newFlow.delayUnit = 'min'
-  newFlow.message = ''
-  showFlowModal.value = true
-}
+// Flow state (for the modal UI only)
+const showFlowModal = ref(false)
+const newFlow = ref({ name: '', trigger: 'new_user', delayValue: 15, delayUnit: 'min', message: '' })
+const openNewFlow = () => { showFlowModal.value = true }
 
-const saveFlow = () => {
-  const flow: Flow = {
-    id: Date.now(),
-    name: newFlow.name,
-    trigger: newFlow.trigger,
-    delayValue: newFlow.delayValue,
-    delayUnit: newFlow.delayUnit,
-    message: newFlow.message,
-    active: true,
-    sent: 0,
-    createdAt: new Date().toISOString()
-  }
-  flows.value.unshift(flow)
-  showFlowModal.value = false
-}
-
-const deleteFlow = (id: number) => {
-  flows.value = flows.value.filter(f => f.id !== id)
-}
 </script>
 
 

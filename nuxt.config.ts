@@ -12,8 +12,12 @@ export default defineNuxtConfig({
     '@nuxtjs/color-mode',
     '@pinia/nuxt',
     '@nuxtjs/tailwindcss',
-    '@vite-pwa/nuxt'
+    '@vite-pwa/nuxt',
+    '@nuxtjs/supabase'
   ],
+  supabase: {
+    redirect: false // Desabilitar redirecionamento automático de login por enquanto
+  },
   pwa: {
     manifest: {
       name: 'Lojou CRM Interno',

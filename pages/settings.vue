@@ -221,14 +221,17 @@ const evoApi = computed(() => axios.create({
   }
 }))
 
-onMounted(() => {
+onMounted(async () => {
   if (typeof window === 'undefined') return
-  evolutionUrl.value = localStorage.getItem('evolution_url') || ''
-  evolutionKey.value = localStorage.getItem('evolution_api_key') || ''
-  instanceName.value = localStorage.getItem('evolution_instance') || 'lojou-crm'
   
-  // Check existing status if credentials exist
-  if (evolutionUrl.value && evolutionKey.value) {
+  // Primeiro tentamos carregar do Supabase (via useEvolution refatorado)
+  const creds = await evo.getCredentials()
+  if (creds) {
+    evolutionUrl.value = creds.url
+    evolutionKey.value = creds.key
+    instanceName.value = creds.instance
+    
+    // Check existing status if credentials exist
     checkInstanceStatus()
   }
 })
@@ -237,11 +240,22 @@ onUnmounted(() => {
   clearInterval(pollTimer)
 })
 
-const saveCredentials = () => {
-  localStorage.setItem('evolution_url', evolutionUrl.value.trim())
-  localStorage.setItem('evolution_api_key', evolutionKey.value.trim())
-  localStorage.setItem('evolution_instance', instanceName.value.trim())
+const saveCredentials = async () => {
+  actionLoading.value = true
   errorMessage.value = ''
+  try {
+    const url = evolutionUrl.value.trim()
+    const key = evolutionKey.value.trim()
+    const instance = instanceName.value.trim()
+    
+    // Agora salva no Supabase (Backend Centralizado)
+    await evo.saveSettings(url, key, instance)
+    alert('Configurações salvas no Supabase com sucesso!')
+  } catch (err: any) {
+    errorMessage.value = 'Erro ao salvar no backend: ' + (err.message || 'Erro desconhecido')
+  } finally {
+    actionLoading.value = false
+  }
 }
 
 const checkInstanceStatus = async () => {

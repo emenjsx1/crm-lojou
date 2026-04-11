@@ -207,9 +207,25 @@ const sendCampaign = async () => {
   
   if (confirm(`Atenção: Deseja iniciar o disparo para ${selectedContacts.value.length} contatos?`)) {
     sendingCampaign.value = true
+    const supabase = useSupabaseClient()
+    
     try {
       const targets = store.contacts.filter((c: any) => selectedContacts.value.includes(c.id))
       
+      // 1. Registrar a Transmissão no Banco de Dados Backend
+      const { data: broadcast, error: bError } = await supabase
+        .from('broadcasts')
+        .insert({
+          name: campaignName.value,
+          message: messageTemplate.value,
+          total_contacts: targets.length,
+          status: 'sending'
+        })
+        .select()
+        .single()
+
+      if (bError) throw new Error('Falha ao iniciar registro da transmissão no Supabase: ' + bError.message)
+
       for (const contact of targets) {
         const rawPhone = contact.phone_number || contact.phone || contact.whatsapp
         if (!rawPhone) continue
@@ -219,17 +235,43 @@ const sendCampaign = async () => {
         msg = msg.replace(/{email}/g, contact.email || '')
         msg = msg.replace(/{status}/g, contact.status || '')
         
-        await evo.sendText(rawPhone, msg)
+        try {
+          await evo.sendText(rawPhone, msg)
+          
+          // 2. Registrar Log de Sucesso
+          await supabase.from('campaign_logs').insert({
+            broadcast_id: broadcast.id,
+            contact_name: contact.firstname || contact.name || contact.full_name || 'Cliente',
+            contact_phone: rawPhone,
+            status: 'sent'
+          })
+        } catch (err: any) {
+          // 3. Registrar Log de Falha
+          await supabase.from('campaign_logs').insert({
+            broadcast_id: broadcast.id,
+            contact_name: contact.firstname || contact.name || contact.full_name || 'Cliente',
+            contact_phone: rawPhone,
+            status: 'failed',
+            error_message: err.message
+          })
+        }
+
         // Delay anti-ban seguro (1.5s)
         await new Promise(resolve => setTimeout(resolve, 1500))
       }
       
-      alert('Campanha enviada com sucesso para a fila de processamento!')
+      // 4. Marcar como Concluído
+      await supabase
+        .from('broadcasts')
+        .update({ status: 'completed' })
+        .eq('id', broadcast.id)
+
+      alert('Campanha enviada e registrada no backend com sucesso!')
       campaignName.value = ''
       messageTemplate.value = ''
       selectedContacts.value = []
     } catch (e: any) {
-      alert('Erro no disparo: ' + (e?.message || 'Houve um problema na comunicação com a Evolution.'))
+      alert('Erro durante o processo: ' + (e?.message || 'Houve um problema na comunicação.'))
     } finally {
       sendingCampaign.value = false
     }

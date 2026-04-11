@@ -15,7 +15,51 @@ export interface EvoMessage {
 }
 
 export const useEvolution = () => {
-  const getCredentials = () => {
+  const clientSupabase = useSupabaseClient()
+
+  // Número moçambicano: 9 dígitos começando por 8 → adiciona 258
+  const formatPhone = (raw: string): string => {
+    let d = raw.replace(/\D/g, '')
+    if (d.startsWith('0')) d = d.slice(1)
+    if (d.length === 9) d = '258' + d
+    return d
+  }
+
+  const fetchSettings = async () => {
+    const { data, error } = await clientSupabase
+      .from('settings')
+      .select('value')
+      .eq('key', 'evolution_config')
+      .maybeSingle()
+    
+    if (error || !data) return null
+    return data.value as { url: string; key: string; instance: string }
+  }
+
+  const saveSettings = async (url: string, key: string, instance: string) => {
+    const value = { url, key, instance }
+    const { error } = await clientSupabase
+      .from('settings')
+      .upsert({ 
+        key: 'evolution_config', 
+        value, 
+        updated_at: new Date().toISOString() 
+      }, { onConflict: 'key' })
+    
+    if (error) throw error
+    
+    // Sync to localStorage as fallback
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('evolution_url', url)
+      localStorage.setItem('evolution_api_key', key)
+      localStorage.setItem('evolution_instance', instance)
+    }
+  }
+
+  const getCredentials = async () => {
+    const remote = await fetchSettings()
+    if (remote) return remote
+
     if (typeof window === 'undefined') return null
     const url = localStorage.getItem('evolution_url')?.replace(/\/$/, '')
     const key = localStorage.getItem('evolution_api_key')
@@ -24,18 +68,8 @@ export const useEvolution = () => {
     return { url, key, instance }
   }
 
-  // Número moçambicano: 9 dígitos começando por 8 → adiciona 258
-  // Ex: 855253617 → 258855253617 | +258855253617 → 258855253617
-  const formatPhone = (raw: string): string => {
-    let d = raw.replace(/\D/g, '')
-    if (d.startsWith('0')) d = d.slice(1)
-    if (d.length === 9) d = '258' + d
-    // Se veio com 258 à frente mas sem + já está correcto
-    return d
-  }
-
-  const makeClient = () => {
-    const creds = getCredentials()
+  const makeClient = async () => {
+    const creds = await getCredentials()
     if (!creds) return null
     return {
       http: axios.create({
@@ -101,56 +135,40 @@ export const useEvolution = () => {
   }
 
   const fetchHistory = async (rawPhone: string, limit = 60): Promise<EvoMessage[]> => {
-    const c = makeClient()
+    const c = await makeClient()
     if (!c) return []
     const phone = formatPhone(rawPhone)
     const jid = phone + '@s.whatsapp.net'
 
-    // Tenta os endpoints conhecidos das diferentes versões da Evolution API
     const attempts = [
-      // v2 / v2.1
       () => c.http.post(`/message/findMessages/${c.instance}`, {
         where: { key: { remoteJid: jid } }, page: 1, offset: limit
       }),
-      // v2 alternativo
       () => c.http.post(`/chat/findMessages/${c.instance}`, {
         where: { key: { remoteJid: jid } }, page: 1, offset: limit
       }),
-      // v1 (GET com query params)
       () => c.http.get(`/message/findMessages/${c.instance}`, {
         params: { remoteJid: jid, limit }
-      }),
-      // Fetch messages by number (algumas versões)
-      () => c.http.get(`/chat/messages/${c.instance}/${phone}`, {
-        params: { limit }
-      }),
+      })
     ]
 
     for (const attempt of attempts) {
       try {
         const res = await attempt()
-        const raw = res.data?.messages?.records
-          || res.data?.messages
-          || res.data?.data
-          || res.data
-          || []
-        if (Array.isArray(raw) && raw.length >= 0) {
+        const raw = res.data?.messages?.records || res.data?.messages || res.data?.data || res.data || []
+        if (Array.isArray(raw)) {
           return raw.map(parseRecord).filter(Boolean) as EvoMessage[]
         }
       } catch (e: any) {
-        // 404 = endpoint não existe nesta versão, tenta o próximo
         if (e?.response?.status === 404 || e?.response?.status === 405) continue
-        // Outro erro (401, 500, etc.) — para aqui
-        console.warn('[EVO] fetchHistory falhou:', e?.response?.status, e?.message)
         break
       }
     }
-
     return []
   }
 
   const sendText = async (rawPhone: string, text: string) => {
-    const c = makeClient()
+    const c = await makeClient()
     if (!c) throw new Error('Evolution não configurado')
     const res = await c.http.post(`/message/sendText/${c.instance}`, {
       number: formatPhone(rawPhone),
@@ -161,14 +179,13 @@ export const useEvolution = () => {
 
   const sendMedia = async (rawPhone: string, opts: {
     type: 'image' | 'audio' | 'video' | 'document'
-    base64: string   // pode incluir o prefixo data:
+    base64: string
     filename: string
     mimeType: string
     caption?: string
   }) => {
-    const c = makeClient()
+    const c = await makeClient()
     if (!c) throw new Error('Evolution não configurado')
-    // Remove o prefixo data:... se existir
     const cleanBase64 = opts.base64.includes(',') ? opts.base64.split(',')[1] : opts.base64
     const res = await c.http.post(`/message/sendMedia/${c.instance}`, {
       number: formatPhone(rawPhone),
@@ -181,9 +198,8 @@ export const useEvolution = () => {
     return res.data
   }
 
-  // Configura webhook automático na Evolution para receber mensagens em tempo real
   const configureWebhook = async (webhookUrl: string) => {
-    const c = makeClient()
+    const c = await makeClient()
     if (!c) return
     try {
       await c.http.put(`/webhook/set/${c.instance}`, {
@@ -195,11 +211,18 @@ export const useEvolution = () => {
           events: ['MESSAGES_UPSERT', 'MESSAGES_UPDATE', 'CONNECTION_UPDATE', 'QRCODE_UPDATED']
         }
       })
-      console.log('[EVO] Webhook configurado:', webhookUrl)
     } catch (e: any) {
-      console.warn('[EVO] Webhook config falhou (precisa de URL pública):', e?.response?.data || e?.message)
+      console.warn('[EVO] Webhook config falhou:', e?.response?.data || e?.message)
     }
   }
 
-  return { formatPhone, fetchHistory, sendText, sendMedia, configureWebhook, getCredentials }
+  return { 
+    formatPhone, 
+    fetchHistory, 
+    sendText, 
+    sendMedia, 
+    configureWebhook, 
+    getCredentials, 
+    saveSettings 
+  }
 }
