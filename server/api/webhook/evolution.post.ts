@@ -11,7 +11,6 @@ export default defineEventHandler(async (event) => {
     'MESSAGES_UPSERT', 
     'MESSAGES_UPDATE', 
     'MESSAGES_SET', 
-    'MESSAGES_UPSERT', 
     'SEND_MESSAGE'
   ]
 
@@ -73,16 +72,17 @@ export default defineEventHandler(async (event) => {
   }
 
   const phone = (message.key.remoteJid || '').split('@')[0]
-  
+  if (!phone || phone.includes('status')) return { status: 'ignored', reason: 'invalid phone' }
+
   // Upsert no banco
   const { error } = await supabase
     .from('messages')
     .upsert({
       id: message.key.id,
-      contact_id: phone, // Aqui usamos o telefone como ID provisório se não soubermos o CRM ID
+      contact_id: phone, 
       content,
       type,
-      is_outgoing: !!message.key.fromMe,
+      is_outgoing: !!message.key.fromMe || eventName === 'SEND_MESSAGE',
       status: 'delivered',
       timestamp: message.messageTimestamp ? new Date(message.messageTimestamp * 1000).toISOString() : new Date().toISOString(),
       media_url: mediaUrl,

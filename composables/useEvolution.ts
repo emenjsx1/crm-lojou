@@ -244,7 +244,7 @@ export const useEvolution = () => {
     const c = await makeClient()
     if (!c) return
     try {
-      console.log(`[EVO] Configurando webhook para: ${webhookUrl}`)
+      console.log(`[EVO] Configurando webhook completo para: ${webhookUrl}`)
       await c.http.post(`/webhook/set/${c.instance}`, {
         webhook: {
           enabled: true,
@@ -257,11 +257,26 @@ export const useEvolution = () => {
             'MESSAGES_DELETE', 
             'SEND_MESSAGE', 
             'CONNECTION_UPDATE', 
-            'QRCODE_UPDATED'
+            'QRCODE_UPDATED',
+            'TYPEING_START'
           ]
         }
       })
-      console.log('[EVO] Webhook configurado com sucesso!')
+      
+      // Forçar configurações da instância para não ignorar mensagens próprias
+      try {
+        await c.http.post(`/instance/settings/${c.instance}`, {
+          rejectCall: false,
+          msgCall: '',
+          groupsIgnore: false,
+          alwaysOnline: true,
+          readMessages: true,
+          readStatus: true,
+          syncFullHistory: true
+        })
+      } catch (e) {}
+
+      console.log('[EVO] Webhook e Configurações da Instância aplicadas!')
     } catch (e: any) {
       console.warn('[EVO] Webhook config falhou:', e?.response?.data || e?.message)
     }
