@@ -162,10 +162,9 @@ const simulatedMessage = computed(() => {
 })
 
 onMounted(() => {
-  if (store.contacts.length === 0) {
-    // Carregamos 2000 contatos para garantir que toda a base Moçambique apareça
-    store.fetchContacts({ is_paginate: 1, per_page: 2000, page: 1 })
-  }
+  // Sempre forçamos o carregamento da lista completa (2000+) ao entrar na transmissão
+  // para garantir que nenhum contato fique de fora, ignorando caches parciais de outras páginas.
+  store.fetchContacts({ is_paginate: 1, per_page: 2000, page: 1 })
 })
 
 const filteredContacts = computed(() => {
