@@ -247,15 +247,24 @@ export const useEvolution = () => {
     const c = await makeClient()
     if (!c) return
     try {
-      await c.http.put(`/webhook/set/${c.instance}`, {
+      console.log(`[EVO] Configurando webhook para: ${webhookUrl}`)
+      await c.http.post(`/webhook/set/${c.instance}`, {
         webhook: {
           enabled: true,
           url: webhookUrl,
-          byEvents: false,
-          base64: true,
-          events: ['MESSAGES_UPSERT', 'MESSAGES_UPDATE', 'CONNECTION_UPDATE', 'QRCODE_UPDATED']
+          webhookByEvents: false,
+          webhookBase64: true,
+          events: [
+            'MESSAGES_UPSERT', 
+            'MESSAGES_UPDATE', 
+            'MESSAGES_DELETE', 
+            'SEND_MESSAGE', 
+            'CONNECTION_UPDATE', 
+            'QRCODE_UPDATED'
+          ]
         }
       })
+      console.log('[EVO] Webhook configurado com sucesso!')
     } catch (e: any) {
       console.warn('[EVO] Webhook config falhou:', e?.response?.data || e?.message)
     }

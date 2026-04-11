@@ -4,9 +4,19 @@ import { createClient } from '@supabase/supabase-js'
 export default defineEventHandler(async (event) => {
   const body = await readBody(event)
   
-  // A Evolution API envia vários tipos de eventos. O principal é MESSAGES_UPSERT
-  if (body.event !== 'MESSAGES_UPSERT' && body.event !== 'messages.upsert') {
-    return { status: 'ignored', event: body.event }
+  const eventName = (body.event || body.type || '').toUpperCase()
+  
+  // Lista de eventos que nos interessam para atualizar conversas
+  const allowedEvents = [
+    'MESSAGES_UPSERT', 
+    'MESSAGES_UPDATE', 
+    'MESSAGES_SET', 
+    'MESSAGES_UPSERT', 
+    'SEND_MESSAGE'
+  ]
+
+  if (!allowedEvents.includes(eventName)) {
+    return { status: 'ignored', event: eventName }
   }
 
   const payload = body.data || body
