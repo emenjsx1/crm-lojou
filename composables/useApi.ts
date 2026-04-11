@@ -28,13 +28,13 @@ export const useApi = () => {
       // Em produção (lojou.app), usamos estritamente o cookie session_1
       token = getCookie('session_1')
     } else {
-      // Em desenvolvimento local, usamos o token em memória
-      token = auth.token
+      // Em desenvolvimento local, usamos o token em memória ou um fallback para testes
+      token = auth.token || 'eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJpc3MiOiJodHRwczovL2FwcC5ibG9kYXF1ZS5jb20vYXBpL3ZlbmRvci9hdXRoL2xvZ2luIiwiaWF0IjoxNzczNDg1NDYwLCJleHAiOjE3ODY4MjEwNjAsIm5iZiI6MTc3MzQ4NTQ2MCwianRpIjoiTTdWY3lDTmZyUm1oZXBxTCIsInN1YiI6IjM5IiwicHJ2IjoiMjNiZDVjODk0OWY2MDBhZGIzOWU3MDFjNDAwODcyZGI3YTU5NzZmNyJ9.4bcQEBQ_NSBf6gDeq641uO_RMMIpUTkDgAbRjorXE6w'
     }
 
     if (token) {
-      // O token session_1 é injetado diretamente no header Authorization
-      req.headers.Authorization = token
+      // Garante que o Bearer prefix seja enviado para a API Laravel/Evolution
+      req.headers.Authorization = token.startsWith('Bearer ') ? token : `Bearer ${token}`
     }
 
     return req
