@@ -180,6 +180,7 @@ let debounceTimer: any = null
 
 // Polling
 let pollTimer: any = null
+let globalPollTimer: any = null
 const POLL_INTERVAL = 4000 // 4 segundos
 
 onMounted(() => {
@@ -189,10 +190,39 @@ onMounted(() => {
   if (contactsStore.contacts.length === 0) {
     contactsStore.fetchContacts({ is_paginate: 1, per_page: 100, page: 1 })
   }
+
+  // Polling Global para novas mensagens em qualquer chat (a cada 5s)
+  globalPollTimer = setInterval(async () => {
+    try {
+      const updatedChats = await evo.fetchChats()
+      if (updatedChats?.length > 0) {
+        // Sincroniza os 8 chats mais recentes para detectar novas mensagens
+        for (const chat of updatedChats.slice(0, 8)) {
+          const phone = (chat.id || chat.remoteJid || '').split('@')[0]
+          if (!phone || phone.includes('status')) continue
+          
+          const msgs = await evo.fetchHistory(phone, 3)
+          if (msgs.length > 0) {
+            let contactId = phone
+            const contact = contactsStore.contacts.find(c => {
+               const cPhone = String(c.phone_number || c.phone || c.whatsapp || '').replace(/\D/g, '')
+               return cPhone.endsWith(phone) || phone.endsWith(cPhone)
+            })
+            if (contact) contactId = contact.id
+            await messagesStore.syncFromEvolution(contactId, msgs)
+            if (contact) markContactAsMessaged(contact)
+          }
+        }
+      }
+    } catch (e) {
+      console.warn('[GLOBAL POLL] Falhou:', e)
+    }
+  }, 5000)
 })
 
 onUnmounted(() => {
   clearInterval(pollTimer)
+  clearInterval(globalPollTimer)
 })
 
 const markContactAsMessaged = (contact: any) => {
@@ -272,17 +302,22 @@ const selectContact = async (contact: any) => {
     markContactAsMessaged(contact)
   }
 
-  // Inicia polling para mensagens novas
+  // Polling para o contacto activo (mais frequente/profundo enquanto a conversa está aberta)
   pollTimer = setInterval(async () => {
     if (!activeContact.value) return
     const ph = activeContact.value.phone_number || activeContact.value.phone || activeContact.value.whatsapp
     if (!ph) return
     const msgs = await evo.fetchHistory(ph, 20)
     if (msgs.length > 0) {
-      messagesStore.syncFromEvolution(activeContact.value.id, msgs)
+      await messagesStore.syncFromEvolution(activeContact.value.id, msgs)
     }
   }, POLL_INTERVAL)
 }
+
+onUnmounted(() => {
+  clearInterval(pollTimer)
+  // Certifique-se de limpar o globalPollTimer se ele for definido no escopo acessível
+})
 
 // Envio de texto
 const onSendText = async (content: string) => {
