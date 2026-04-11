@@ -128,7 +128,11 @@ export const useMessageStore = defineStore('messages', {
 
       // Bulk upsert para o Supabase
       if (toUpsert.length > 0) {
-        await client.from('messages').upsert(toUpsert, { onConflict: 'id' })
+        try {
+          await client.from('messages').upsert(toUpsert, { onConflict: 'id' })
+        } catch (e) {
+          console.error('[DATABASE ERROR] Erro ao salvar mensagens no Supabase:', e)
+        }
       }
     },
 

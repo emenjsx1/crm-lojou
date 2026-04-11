@@ -177,12 +177,13 @@ export const useEvolution = () => {
     const phone = formatPhone(rawPhone)
     const jid = phone + '@s.whatsapp.net'
 
+    // Tentar múltiplos endpoints de busca de mensagens (compatibilidade entre versões)
     const attempts = [
       () => c.http.post(`/message/findMessages/${c.instance}`, {
-        where: { key: { remoteJid: jid } }, page: 1, offset: limit
+        where: { key: { remoteJid: jid } }, page: 1, limit: limit
       }),
       () => c.http.post(`/chat/findMessages/${c.instance}`, {
-        where: { key: { remoteJid: jid } }, page: 1, offset: limit
+        where: { key: { remoteJid: jid } }, page: 1, limit: limit
       }),
       () => c.http.get(`/message/findMessages/${c.instance}`, {
         params: { remoteJid: jid, limit }
@@ -194,10 +195,13 @@ export const useEvolution = () => {
         const res = await attempt()
         const raw = res.data?.messages?.records || res.data?.messages || res.data?.data || res.data || []
         if (Array.isArray(raw)) {
-          return raw.map(parseRecord).filter(Boolean) as EvoMessage[]
+          const parsed = raw.map(parseRecord).filter(Boolean) as EvoMessage[]
+          console.log(`[EVO] Encontradas ${parsed.length} mensagens para ${phone}`)
+          return parsed
         }
       } catch (e: any) {
         if (e?.response?.status === 404 || e?.response?.status === 405) continue
+        console.warn('[EVO] Falha em tentativa de fetchHistory:', e.message)
         break
       }
     }
