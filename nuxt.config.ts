@@ -11,8 +11,32 @@ export default defineNuxtConfig({
     '@nuxt/ui',
     '@nuxtjs/color-mode',
     '@pinia/nuxt',
-    '@nuxtjs/tailwindcss'
+    '@nuxtjs/tailwindcss',
+    '@vite-pwa/nuxt'
   ],
+  pwa: {
+    manifest: {
+      name: 'Lojou CRM Interno',
+      short_name: 'LojouCRM',
+      description: 'Sistema de Mensagens Lojou CRM',
+      theme_color: '#FF009D',
+      icons: [
+        {
+          src: 'lojou-logo.svg',
+          sizes: 'any',
+          type: 'image/svg+xml',
+          purpose: 'any maskable'
+        }
+      ]
+    },
+    workbox: {
+      navigateFallback: '/'
+    },
+    devOptions: {
+      enabled: true,
+      type: 'module'
+    }
+  },
   css: [
     '@/assets/css/main.css',
     '@/assets/css/design-system.css'
