@@ -95,9 +95,17 @@ export const useContactStore = defineStore('contacts', {
         }
       } catch (error: any) {
         console.error('Erro ao buscar contatos na API Lojou:', error)
-        this.apiError = error.message || String(error)
-        if (error.response) {
-            this.apiError += " | Status: " + error.response.status + " | Data: " + JSON.stringify(error.response.data)
+        
+        if (error.response?.status === 401) {
+          this.apiError = 'Sessão expirada ou não autorizada. Por favor, faça login no painel principal da Lojou.app para renovar o seu acesso.'
+        } else {
+          // Fallback para outros erros, evitando exibir HTML bruto
+          const errorData = error.response?.data
+          const message = typeof errorData === 'string' && errorData.includes('<!DOCTYPE') 
+            ? 'Erro interno no servidor da API' 
+            : (errorData?.message || error.message || 'Erro desconhecido')
+            
+          this.apiError = `Falha na requisição: ${message} (Status: ${error.response?.status || '??'})`
         }
       } finally {
         this.loading = false

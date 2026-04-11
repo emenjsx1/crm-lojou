@@ -91,13 +91,22 @@
           </div>
           
           <!-- Users Log -->
-          <div class="flex-1 min-h-[250px] overflow-y-auto p-2">
-             <div class="sticky top-0 bg-white/90 dark:bg-[#09090b]/90 backdrop-blur-sm z-10 p-2 flex justify-between items-center border-b border-zinc-100 dark:border-zinc-800/50">
-               <span class="text-[11px] font-bold tracking-wider uppercase text-zinc-500">{{ selectedContacts.length }} Selecionados</span>
-               <label class="flex items-center gap-2 cursor-pointer text-xs font-medium dark:text-zinc-300 hover:text-[#FF009D] transition-colors">
-                 Tudo <input type="checkbox" v-model="selectAll" class="accent-[#FF009D] w-3 h-3" />
-               </label>
+          <div class="flex-1 min-h-[300px] flex flex-col overflow-hidden">
+             <!-- Search and Actions -->
+             <div class="p-3 border-b border-zinc-100 dark:border-zinc-800/50 space-y-3">
+               <div class="relative">
+                 <Icon name="ph:magnifying-glass-bold" class="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400 w-4 h-4" />
+                 <input v-model="searchQuery" type="text" placeholder="Pesquisar contatos..." class="w-full pl-9 pr-4 py-2 bg-zinc-50 dark:bg-zinc-900/50 border border-zinc-200 dark:border-zinc-800 rounded-lg text-xs focus:outline-none focus:ring-1 focus:ring-[#FF009D]" />
+               </div>
+               <div class="flex justify-between items-center px-1">
+                 <span class="text-[10px] font-bold tracking-wider uppercase text-zinc-500">{{ selectedContacts.length }} / {{ filteredContacts.length }} Selecionados</span>
+                 <label class="flex items-center gap-2 cursor-pointer text-[11px] font-bold uppercase text-[#FF009D] hover:opacity-80 transition-opacity">
+                   Selecionar tudo <input type="checkbox" v-model="selectAll" class="accent-[#FF009D] w-3 h-3" />
+                 </label>
+               </div>
              </div>
+             
+             <div class="flex-1 overflow-y-auto p-2">
              <div class="p-2 flex flex-col gap-1">
                <label v-for="contact in filteredContacts" :key="contact.id" class="flex items-center gap-3 p-2 rounded-lg hover:bg-zinc-50 dark:hover:bg-zinc-900/40 cursor-pointer border border-transparent hover:border-zinc-200 dark:hover:border-zinc-800 transition-colors">
                  <input type="checkbox" v-model="selectedContacts" :value="contact.id" class="accent-[#FF009D]" />
@@ -135,6 +144,7 @@ const filters = reactive({
 const sendingCampaign = ref(false)
 const campaignName = ref('')
 const messageTemplate = ref('')
+const searchQuery = ref('')
 
 const simulatedMessage = computed(() => {
   let msg = messageTemplate.value
@@ -146,12 +156,22 @@ const simulatedMessage = computed(() => {
 
 onMounted(() => {
   if(store.contacts.length === 0) {
-    store.fetchContacts({ is_paginate: 1, per_page: 100, page: 1 })
+    // Carregamos um número alto para cobrir todos os contatos como solicitado (ex: 2000)
+    store.fetchContacts({ is_paginate: 1, per_page: 2000, page: 1 })
   }
 })
 
 const filteredContacts = computed(() => {
   return store.contacts.filter((c: any) => {
+    // Search filter
+    if (searchQuery.value) {
+      const q = searchQuery.value.toLowerCase()
+      const name = (c.full_name || c.firstname || c.name || '').toLowerCase()
+      const email = (c.email || '').toLowerCase()
+      const phone = (c.phone_number || c.phone || '').toLowerCase()
+      if (!name.includes(q) && !email.includes(q) && !phone.includes(q)) return false
+    }
+
     let matchStatus = true
     if (filters.status === 'purchased') matchStatus = c.has_purchased === true
     if (filters.status === 'not_purchased') matchStatus = c.has_purchased === false || !c.has_purchased
