@@ -1,3 +1,4 @@
+// Build timestamp: 2026-04-11 23:32
 import { defineNuxtConfig } from 'nuxt/config'
 
 export default defineNuxtConfig({
