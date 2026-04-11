@@ -1,5 +1,5 @@
 <template>
-  <div class="space-y-6 max-w-7xl mx-auto pb-10">
+  <div class="space-y-6 max-w-7xl mx-auto pb-10 px-4 sm:px-6">
     <div class="mb-8">
       <h2 class="text-2xl font-bold text-zinc-900 dark:text-white">Transmissão em Massa</h2>
       <p class="text-sm text-zinc-500 mt-1">Dispare mensagens de forma profissional para listas filtradas da base Evolution.</p>
@@ -7,7 +7,7 @@
 
     <div class="grid grid-cols-1 lg:grid-cols-12 gap-8">
       
-      <!-- Left Column: Composer (Col-span 8) -->
+      <!-- Coluna Esquerda: Compositor de Mensagem -->
       <div class="lg:col-span-8 flex flex-col gap-6">
          <div class="bg-white dark:bg-[#09090b] border border-zinc-200 dark:border-zinc-800 rounded-2xl shadow-sm overflow-hidden">
             <div class="px-6 py-5 border-b border-zinc-200 dark:border-zinc-800 flex items-center justify-between">
@@ -48,10 +48,10 @@
          </div>
       </div>
 
-      <!-- Right Column: Filtering & Preview (Col-span 4) -->
+      <!-- Coluna Direita: Filtros e Preview -->
       <div class="lg:col-span-4 flex flex-col gap-6">
         
-        <!-- Live Preview -->
+        <!-- Preview em Tempo Real -->
         <div class="bg-green-50 dark:bg-[#111b11] border border-green-200 dark:border-green-900/30 rounded-2xl p-5 shadow-sm">
            <h4 class="font-semibold text-emerald-800 dark:text-emerald-500 text-sm mb-3 flex items-center gap-2">
              <Icon name="ph:device-mobile-bold" class="w-4 h-4"/> Preview WhatsApp
@@ -65,15 +65,16 @@
            </div>
         </div>
 
-        <!-- Audience Filter -->
-        <div class="bg-white dark:bg-[#09090b] border border-zinc-200 dark:border-zinc-800 rounded-2xl shadow-sm flex flex-col flex-1">
+        <!-- Filtros de Audiência -->
+        <div class="bg-white dark:bg-[#09090b] border border-zinc-200 dark:border-zinc-800 rounded-2xl shadow-sm flex flex-col flex-1 h-full max-h-[700px]">
           <div class="p-5 border-b border-zinc-200 dark:border-zinc-800">
              <h3 class="font-semibold text-zinc-900 dark:text-white text-base">Audiência</h3>
              <p class="text-xs text-zinc-500 mt-1">Selecione quem vai receber ({{ filteredContacts.length }} de {{ store.contacts.length }})</p>
           </div>
-          <div class="p-5 flex flex-col gap-5 border-b border-zinc-100 dark:border-zinc-800/50">
-             <div class="flex flex-col gap-2">
-               <label class="text-xs font-semibold text-zinc-700 dark:text-zinc-300">Intenção de Compra</label>
+          
+          <div class="p-5 flex flex-col gap-4 border-b border-zinc-100 dark:border-zinc-800/50 shadow-inner">
+             <div class="flex flex-col gap-1.5">
+               <label class="text-[11px] font-bold uppercase tracking-wider text-zinc-400">Intenção de Compra</label>
                <select v-model="filters.status" class="w-full px-3 py-2 bg-zinc-50 dark:bg-zinc-900/50 border border-zinc-200 dark:border-zinc-800 rounded-lg text-sm text-zinc-700 dark:text-zinc-300 focus:outline-none focus:border-[#FF009D]">
                  <option value="all">Envio geral (Todos)</option>
                  <option value="purchased">Já fizeram compra</option>
@@ -81,8 +82,8 @@
                </select>
              </div>
              
-             <div class="flex flex-col gap-2">
-               <label class="text-xs font-semibold text-zinc-700 dark:text-zinc-300">Status de Verificação</label>
+             <div class="flex flex-col gap-1.5">
+               <label class="text-[11px] font-bold uppercase tracking-wider text-zinc-400">Status de Verificação</label>
                <select v-model="filters.verification" class="w-full px-3 py-2 bg-zinc-50 dark:bg-zinc-900/50 border border-zinc-200 dark:border-zinc-800 rounded-lg text-sm text-zinc-700 dark:text-zinc-300 focus:outline-none focus:border-[#FF009D]">
                  <option value="all">Qualquer um</option>
                  <option value="verified">Somente verificados</option>
@@ -90,35 +91,41 @@
              </div>
           </div>
           
-          <!-- Users Log -->
-          <div class="flex-1 min-h-[300px] flex flex-col overflow-hidden">
-             <!-- Search and Actions -->
-             <div class="p-3 border-b border-zinc-100 dark:border-zinc-800/50 space-y-3">
+          <!-- Lista de Usuários com Busca -->
+          <div class="flex-1 flex flex-col overflow-hidden min-h-[350px]">
+             <!-- Busca e Acoes em massa -->
+             <div class="p-4 border-b border-zinc-100 dark:border-zinc-800/50 space-y-3 bg-zinc-50/30 dark:bg-zinc-900/20">
                <div class="relative">
                  <Icon name="ph:magnifying-glass-bold" class="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400 w-4 h-4" />
-                 <input v-model="searchQuery" type="text" placeholder="Pesquisar contatos..." class="w-full pl-9 pr-4 py-2 bg-zinc-50 dark:bg-zinc-900/50 border border-zinc-200 dark:border-zinc-800 rounded-lg text-xs focus:outline-none focus:ring-1 focus:ring-[#FF009D]" />
+                 <input v-model="searchQuery" type="text" placeholder="Nome, e-mail ou telefone..." class="w-full pl-9 pr-4 py-2 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-lg text-xs focus:outline-none focus:ring-1 focus:ring-[#FF009D]" />
                </div>
                <div class="flex justify-between items-center px-1">
-                 <span class="text-[10px] font-bold tracking-wider uppercase text-zinc-500">{{ selectedContacts.length }} / {{ filteredContacts.length }} Selecionados</span>
+                 <span class="text-[10px] font-bold tracking-wider uppercase text-zinc-500">{{ selectedContacts.length }} Selecionados</span>
                  <label class="flex items-center gap-2 cursor-pointer text-[11px] font-bold uppercase text-[#FF009D] hover:opacity-80 transition-opacity">
-                   Selecionar tudo <input type="checkbox" v-model="selectAll" class="accent-[#FF009D] w-3 h-3" />
+                   Tudo <input type="checkbox" v-model="selectAll" class="accent-[#FF009D] w-3.5 h-3.5" />
                  </label>
                </div>
              </div>
              
-             <div class="flex-1 overflow-y-auto p-2">
-             <div class="p-2 flex flex-col gap-1">
-               <label v-for="contact in filteredContacts" :key="contact.id" class="flex items-center gap-3 p-2 rounded-lg hover:bg-zinc-50 dark:hover:bg-zinc-900/40 cursor-pointer border border-transparent hover:border-zinc-200 dark:hover:border-zinc-800 transition-colors">
-                 <input type="checkbox" v-model="selectedContacts" :value="contact.id" class="accent-[#FF009D]" />
-                 <div class="flex flex-col min-w-0">
-                    <span class="text-sm font-medium text-zinc-900 dark:text-zinc-100 truncate">{{ contact.full_name || contact.firstname || contact.name || 'Sem nome' }}</span>
-                    <span class="text-[10px] text-zinc-500 truncate">{{ contact.email || contact.phone_number || '-' }}</span>
-                 </div>
-               </label>
+             <!-- Area Scrollavel -->
+             <div class="flex-1 overflow-y-auto p-2 scrollbar-thin scrollbar-thumb-zinc-200 dark:scrollbar-thumb-zinc-800">
+                <div class="flex flex-col gap-1">
+                  <label v-for="contact in filteredContacts" :key="contact.id" class="flex items-center gap-3 p-2.5 rounded-xl hover:bg-zinc-50 dark:hover:bg-zinc-900/60 cursor-pointer border border-transparent hover:border-zinc-200/50 dark:hover:border-zinc-800 transition-all active:scale-[0.98]">
+                    <input type="checkbox" v-model="selectedContacts" :value="contact.id" class="accent-[#FF009D] w-4 h-4" />
+                    <div class="flex flex-col min-w-0">
+                       <span class="text-sm font-semibold text-zinc-900 dark:text-zinc-100 truncate">{{ contact.full_name || contact.firstname || contact.name || 'Sem nome' }}</span>
+                       <span class="text-[11px] text-zinc-500 truncate leading-tight">{{ contact.email || contact.phone_number || '-' }}</span>
+                    </div>
+                  </label>
+                  <div v-if="filteredContacts.length === 0" class="flex flex-col items-center justify-center py-12 text-zinc-400 opacity-60">
+                    <Icon name="ph:users-slash-bold" class="w-8 h-8 mb-2" />
+                    <p class="text-xs font-medium">Nenhum contato encontrado</p>
+                  </div>
+                </div>
              </div>
           </div>
-        </div>
 
+        </div>
       </div>
 
     </div>
@@ -128,12 +135,11 @@
 <script setup lang="ts">
 import { ref, reactive, computed, onMounted } from 'vue'
 import { useContactStore } from '~/stores/contacts'
-import { useToast } from '#imports'
+import { useHead } from '#imports'
 
 useHead({ title: 'Transmissão - Lojou Messaging' })
 
 const store = useContactStore()
-const toast = useToast()
 const evo = useEvolution()
 
 const filters = reactive({
@@ -145,9 +151,10 @@ const sendingCampaign = ref(false)
 const campaignName = ref('')
 const messageTemplate = ref('')
 const searchQuery = ref('')
+const selectedContacts = ref<(string | number)[]>([])
 
 const simulatedMessage = computed(() => {
-  let msg = messageTemplate.value
+  let msg = messageTemplate.value || ''
   msg = msg.replace(/{nome}/g, 'Joaquim Alberto')
   msg = msg.replace(/{email}/g, 'cliente@gmail.com')
   msg = msg.replace(/{status}/g, 'verified')
@@ -155,15 +162,15 @@ const simulatedMessage = computed(() => {
 })
 
 onMounted(() => {
-  if(store.contacts.length === 0) {
-    // Carregamos um número alto para cobrir todos os contatos como solicitado (ex: 2000)
+  if (store.contacts.length === 0) {
+    // Carregamos 2000 contatos para garantir que toda a base Moçambique apareça
     store.fetchContacts({ is_paginate: 1, per_page: 2000, page: 1 })
   }
 })
 
 const filteredContacts = computed(() => {
   return store.contacts.filter((c: any) => {
-    // Search filter
+    // Filtro de Busca Texto
     if (searchQuery.value) {
       const q = searchQuery.value.toLowerCase()
       const name = (c.full_name || c.firstname || c.name || '').toLowerCase()
@@ -172,10 +179,12 @@ const filteredContacts = computed(() => {
       if (!name.includes(q) && !email.includes(q) && !phone.includes(q)) return false
     }
 
+    // Filtros de Status
     let matchStatus = true
     if (filters.status === 'purchased') matchStatus = c.has_purchased === true
     if (filters.status === 'not_purchased') matchStatus = c.has_purchased === false || !c.has_purchased
     
+    // Filtros de Verificação
     let matchVer = true
     if (filters.verification === 'verified') matchVer = c.verified === true
     
@@ -183,45 +192,45 @@ const filteredContacts = computed(() => {
   })
 })
 
-const selectedContacts = ref<any[]>([])
-
 const selectAll = computed({
   get: () => filteredContacts.value.length > 0 && selectedContacts.value.length === filteredContacts.value.length,
   set: (val) => {
-    if (val) selectedContacts.value = filteredContacts.value.map((c:any) => c.id)
+    if (val) selectedContacts.value = filteredContacts.value.map((c: any) => c.id)
     else selectedContacts.value = []
   }
 })
 
 const sendCampaign = async () => {
   if (!campaignName.value || !messageTemplate.value || selectedContacts.value.length === 0) {
-    alert('Erro: Preencha todos os campos e selecione contatos.')
+    alert('Erro: Preencha o título, a mensagem e selecione pelo menos um contato.')
     return
   }
   
-  if(confirm(`Tem certeza que deseja enviar para ${selectedContacts.value.length} destinatários? A ação não pode ser desfeita.`)){
+  if (confirm(`Atenção: Deseja iniciar o disparo para ${selectedContacts.value.length} contatos?`)) {
     sendingCampaign.value = true
     try {
-      const targets = filteredContacts.value.filter((c:any) => selectedContacts.value.includes(c.id))
+      const targets = store.contacts.filter((c: any) => selectedContacts.value.includes(c.id))
+      
       for (const contact of targets) {
         const rawPhone = contact.phone_number || contact.phone || contact.whatsapp
         if (!rawPhone) continue
         
-        // Parse message
         let msg = messageTemplate.value
         msg = msg.replace(/{nome}/g, contact.firstname || contact.name || 'Cliente')
         msg = msg.replace(/{email}/g, contact.email || '')
         msg = msg.replace(/{status}/g, contact.status || '')
         
         await evo.sendText(rawPhone, msg)
-        await new Promise(resolve => setTimeout(resolve, 1500)) // Antiban delay
+        // Delay anti-ban seguro (1.5s)
+        await new Promise(resolve => setTimeout(resolve, 1500))
       }
-      alert('Transmissão concluída com sucesso!')
+      
+      alert('Campanha enviada com sucesso para a fila de processamento!')
       campaignName.value = ''
       messageTemplate.value = ''
       selectedContacts.value = []
     } catch (e: any) {
-      alert('Erro durante o disparo: ' + (e?.response?.data || e.message))
+      alert('Erro no disparo: ' + (e?.message || 'Houve um problema na comunicação com a Evolution.'))
     } finally {
       sendingCampaign.value = false
     }
