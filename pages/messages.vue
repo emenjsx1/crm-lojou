@@ -207,7 +207,9 @@ onMounted(() => {
             console.log(`[POLLING AUDIT] ${msgs.length} mensagens recuperadas para ${phone}.`)
             let contactId = phone
             const contact = contactsStore.contacts.find(c => {
-               const cPhone = String(c.phone_number || c.phone || c.whatsapp || '').replace(/\D/g, '')
+               const rawVal = c.phone_number || c.phone || c.whatsapp
+               if (!rawVal || String(rawVal).length < 6) return false
+               const cPhone = String(rawVal).replace(/\D/g, '')
                return cPhone.endsWith(phone) || phone.endsWith(cPhone)
             })
             if (contact) contactId = contact.id
