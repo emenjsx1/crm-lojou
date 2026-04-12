@@ -81,6 +81,7 @@
 </template>
 
 <script setup lang="ts">
+import { useHead } from '#imports'
 import { ref, computed, onMounted } from 'vue'
 
 useHead({ title: 'Premiação - Lojou' })

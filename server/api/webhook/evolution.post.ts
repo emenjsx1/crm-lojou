@@ -1,4 +1,5 @@
 import { defineEventHandler, readBody } from 'h3'
+import { useRuntimeConfig } from '#imports'
 import { createClient } from '@supabase/supabase-js'
 
 export default defineEventHandler(async (event) => {
@@ -35,8 +36,8 @@ export default defineEventHandler(async (event) => {
   // Configuração do Supabase (Usando runtime config do Nuxt)
   const config = useRuntimeConfig()
   const supabase = createClient(
-    config.public.supabaseUrl,
-    config.public.supabaseKey
+    config.public.supabaseUrl as string,
+    config.public.supabaseKey as string
   )
 
   // Extração de dados (similar ao parseRecord do frontend)

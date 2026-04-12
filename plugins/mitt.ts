@@ -1,3 +1,4 @@
+import { defineNuxtPlugin } from '#imports'
 import mitt from 'mitt'
 
 export default defineNuxtPlugin(() => {

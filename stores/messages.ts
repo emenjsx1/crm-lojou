@@ -1,4 +1,5 @@
 import { defineStore } from 'pinia'
+import { useSupabaseClient } from '#imports'
 import type { EvoMessage } from '~/composables/useEvolution'
 // Supabase client handles auto-import in Nuxt, but we can be explicit if needed for linting
 // or use the global composable inside actions.
@@ -96,7 +97,7 @@ export const useMessageStore = defineStore('messages', {
 
       try {
         console.log(`[STORE AUDIT] Persistindo mensagem ${params.evoId} no Supabase...`)
-        const { data, error } = await client.from('messages').upsert(payload, { onConflict: 'id' }).select()
+        const { data, error } = await (client.from('messages') as any).upsert(payload, { onConflict: 'id' }).select()
         if (error) {
            console.error('[STORE AUDIT] Falha ao persistir no Supabase:', error)
         } else {
@@ -177,7 +178,7 @@ export const useMessageStore = defineStore('messages', {
       // Bulk upsert para o Supabase
       if (toUpsert.length > 0) {
         try {
-          await client.from('messages').upsert(toUpsert, { onConflict: 'id' })
+          await (client.from('messages') as any).upsert(toUpsert, { onConflict: 'id' })
         } catch (e) {
           console.error('[DATABASE ERROR] Erro ao salvar mensagens no Supabase:', e)
         }
@@ -186,8 +187,8 @@ export const useMessageStore = defineStore('messages', {
 
     async fetchFromSupabase(contactId: number | string) {
       const client = useSupabaseClient()
-      const { data, error } = await client
-        .from('messages')
+      const { data, error } = await (client
+        .from('messages') as any)
         .select('*')
         .eq('contact_id', String(contactId))
         .order('timestamp', { ascending: true })
@@ -195,7 +196,7 @@ export const useMessageStore = defineStore('messages', {
       if (!error && data) {
         // Merge with existing avoiding duplicates
         const existingIds = new Set(this.messages.map(m => m.id))
-        data.forEach(m => {
+        ;(data as any[]).forEach(m => {
           if (!existingIds.has(m.id)) {
             this.messages.push({
               id: m.id,

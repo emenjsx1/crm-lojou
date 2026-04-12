@@ -175,6 +175,7 @@
 </template>
 
 <script setup lang="ts">
+import { useHead, useSupabaseClient } from '#imports'
 import { ref, computed, onMounted } from 'vue'
 
 useHead({ title: 'Campanhas - Lojou Messaging' })

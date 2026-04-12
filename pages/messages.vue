@@ -111,6 +111,7 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
+import { useSupabaseClient, useHead, useRuntimeConfig } from '#imports'
 import { useContactStore } from '~/stores/contacts'
 import { useMessageStore } from '~/stores/messages'
 import { useApi } from '~/composables/useApi'
@@ -153,14 +154,17 @@ const syncAll = async () => {
           phone_number: phone,
           name: chat.name || phone,
           full_name: chat.name || phone,
+          email: ''
         }
       }
 
-      // Buscar histórico (últimas 40 mensagens de cada)
-      const history = await evo.fetchHistory(phone, 40)
-      if (history.length > 0) {
-        await messagesStore.syncFromEvolution(contact.id, history)
-        markContactAsMessaged(contact)
+      if (contact) {
+        // Buscar histórico (últimas 40 mensagens de cada)
+        const history = await evo.fetchHistory(phone, 40)
+        if (history && (history as any[]).length > 0) {
+          await messagesStore.syncFromEvolution((contact as any).id, history)
+          markContactAsMessaged(contact)
+        }
       }
     }
     alert('Sincronização concluída com sucesso!')
@@ -189,7 +193,7 @@ onMounted(() => {
     agentSignature.value = localStorage.getItem('lojou_agent_signature') || ''
   }
   if (contactsStore.contacts.length === 0) {
-    contactsStore.fetchContacts({ is_paginate: 1, per_page: 100, page: 1 })
+    contactsStore.fetchContacts({ is_paginate: true, per_page: 100, page: 1 })
   }
 
   // Polling Global para novas mensagens em qualquer chat (a cada 5s)
@@ -204,16 +208,17 @@ onMounted(() => {
           if (!phone || phone.includes('status')) continue
           
           const msgs = await evo.fetchHistory(phone, 5) // Aumentado para 5 últimas
-          if (msgs.length > 0) {
-            let contactId = phone
-            const contact = contactsStore.contacts.find(c => {
-               const rawVal = c.phone_number || c.phone || c.whatsapp
+          if (msgs && (msgs as any[]).length > 0) {
+            let contactIdForChat: string | number = phone
+            const matched = contactsStore.contacts.find(c => {
+               const rawVal = c.phone_number || c.phone || (c as any).whatsapp
                if (!rawVal || String(rawVal).length < 6) return false
                const cPhone = String(rawVal).replace(/\D/g, '')
                return cPhone.endsWith(phone) || phone.endsWith(cPhone)
             })
-            if (contact) contactId = contact.id
-            await messagesStore.syncFromEvolution(contactId, msgs)
+            if (matched) contactIdForChat = matched.id
+            
+            await messagesStore.syncFromEvolution(contactIdForChat, msgs)
           }
         }
       }
@@ -327,7 +332,7 @@ const onDeleteMessage = async (msgId: string) => {
     await evo.deleteMessage(msgId)
     // Remove do banco e do store
     const client = useSupabaseClient()
-    await client.from('messages').delete().eq('id', msgId)
+    await (client.from('messages') as any).delete().eq('id', msgId)
     const idx = messagesStore.messages.findIndex(m => m.id === msgId)
     if (idx !== -1) messagesStore.messages.splice(idx, 1)
   } catch (err) {
@@ -456,11 +461,11 @@ watch(showSearchModal, async (open) => {
   if (open) {
     globalSearchQuery.value = ''
     if (contactsStore.contacts.length > 0) {
-      searchResults.value = contactsStore.contacts.slice(0, 25)
+      searchResults.value = [...contactsStore.contacts.slice(0, 25)] as any[]
     } else {
       searchLoading.value = true
-      await contactsStore.fetchContacts({ is_paginate: 1, per_page: 100, page: 1 })
-      searchResults.value = contactsStore.contacts.slice(0, 25)
+      await contactsStore.fetchContacts({ is_paginate: true, per_page: 100, page: 1 })
+      searchResults.value = [...contactsStore.contacts.slice(0, 25)] as any[]
       searchLoading.value = false
     }
   }

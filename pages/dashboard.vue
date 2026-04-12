@@ -194,6 +194,7 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
+import { useHead, useRuntimeConfig } from '#imports'
 import { useContactStore } from '~/stores/contacts'
 import { useApi } from '~/composables/useApi'
 import { useRouter } from 'vue-router'
@@ -334,7 +335,7 @@ const fetchEvolutionStatus = async () => {
 }
 
 const fetchAll = async () => {
-  store.fetchContacts({ is_paginate: 1, per_page: 20, page: 1 })
+  await store.fetchContacts({ is_paginate: true, per_page: 5, page: 1 })
   await Promise.all([fetchMetrics(), fetchEvolutionStatus()])
 }
 

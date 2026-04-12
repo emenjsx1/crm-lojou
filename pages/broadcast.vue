@@ -135,7 +135,7 @@
 <script setup lang="ts">
 import { ref, reactive, computed, onMounted } from 'vue'
 import { useContactStore } from '~/stores/contacts'
-import { useHead } from '#imports'
+import { useHead, useSupabaseClient, useEvolution } from '#imports'
 
 useHead({ title: 'Transmissão - Lojou Messaging' })
 
@@ -164,7 +164,7 @@ const simulatedMessage = computed(() => {
 onMounted(() => {
   // Sempre forçamos o carregamento da lista completa (2000+) ao entrar na transmissão
   // para garantir que nenhum contato fique de fora, ignorando caches parciais de outras páginas.
-  store.fetchContacts({ is_paginate: 1, per_page: 2000, page: 1 })
+  store.fetchContacts({ is_paginate: true, per_page: 2000, page: 1 })
 })
 
 const filteredContacts = computed(() => {
@@ -213,8 +213,8 @@ const sendCampaign = async () => {
       const targets = store.contacts.filter((c: any) => selectedContacts.value.includes(c.id))
       
       // 1. Registrar a Transmissão no Banco de Dados Backend
-      const { data: broadcast, error: bError } = await supabase
-        .from('broadcasts')
+      const { data: broadcast, error: bError } = await (supabase
+        .from('broadcasts') as any)
         .insert({
           name: campaignName.value,
           message: messageTemplate.value,
@@ -239,7 +239,7 @@ const sendCampaign = async () => {
           await evo.sendText(rawPhone, msg)
           
           // 2. Registrar Log de Sucesso
-          await supabase.from('campaign_logs').insert({
+          await (supabase.from('campaign_logs') as any).insert({
             broadcast_id: broadcast.id,
             contact_name: contact.firstname || contact.name || contact.full_name || 'Cliente',
             contact_phone: rawPhone,
@@ -247,7 +247,7 @@ const sendCampaign = async () => {
           })
         } catch (err: any) {
           // 3. Registrar Log de Falha
-          await supabase.from('campaign_logs').insert({
+          await (supabase.from('campaign_logs') as any).insert({
             broadcast_id: broadcast.id,
             contact_name: contact.firstname || contact.name || contact.full_name || 'Cliente',
             contact_phone: rawPhone,
@@ -261,8 +261,8 @@ const sendCampaign = async () => {
       }
       
       // 4. Marcar como Concluído
-      await supabase
-        .from('broadcasts')
+      await (supabase
+        .from('broadcasts') as any)
         .update({ status: 'completed' })
         .eq('id', broadcast.id)
 
