@@ -331,15 +331,27 @@ const onSendText = async (content: string) => {
     : content
 
   sending.value = true
-  const msgId = messagesStore.addOutgoing(activeContact.value.id, finalContent, 'text')
+  // ID local temporário
+  const localId = messagesStore.addOutgoing(activeContact.value.id, finalContent, 'text')
 
   try {
-    await evo.sendText(rawPhone, finalContent)
-    messagesStore.updateStatus(msgId, 'delivered')
+    const res = await evo.sendText(rawPhone, finalContent)
+    
+    // Sucesso! Agora pegamos o ID real da Evolution e salvamos IMEDIATAMENTE no Supabase
+    const evoId = res.key?.id || res.id
+    if (evoId) {
+      await messagesStore.addAndSaveOutgoing({
+        localId,
+        evoId,
+        contactId: activeContact.value.id,
+        content: finalContent,
+        type: 'text'
+      })
+    }
     markContactAsMessaged(activeContact.value)
   } catch (err: any) {
     console.error('[SEND TEXT]', err?.response?.data || err.message)
-    messagesStore.updateStatus(msgId, 'error')
+    messagesStore.updateStatus(localId, 'error')
   } finally {
     sending.value = false
   }
@@ -360,21 +372,34 @@ const onSendMedia = async (opts: {
 
   sending.value = true
 
-  // Mensagem optimista (preview local enquanto envia)
   const previewContent = opts.caption || (opts.type === 'image' ? '[Imagem]' : opts.type === 'audio' ? '[Áudio]' : '[Ficheiro]')
-  const msgId = messagesStore.addOutgoing(activeContact.value.id, previewContent, opts.type, {
+  const localId = messagesStore.addOutgoing(activeContact.value.id, previewContent, opts.type, {
     mediaBase64: opts.base64.includes(',') ? opts.base64.split(',')[1] : opts.base64,
     mimeType: opts.mimeType,
     caption: opts.caption
   })
 
   try {
-    await evo.sendMedia(rawPhone, opts)
-    messagesStore.updateStatus(msgId, 'delivered')
+    const res = await evo.sendMedia(rawPhone, opts)
+    
+    // Sucesso! Registro imediato no banco
+    const evoId = res.key?.id || res.id
+    if (evoId) {
+      await messagesStore.addAndSaveOutgoing({
+        localId,
+        evoId,
+        contactId: activeContact.value.id,
+        content: previewContent,
+        type: opts.type,
+        mediaUrl: res.message?.imageMessage?.url || res.message?.audioMessage?.url || res.message?.videoMessage?.url || res.message?.documentMessage?.url,
+        mimeType: opts.mimeType,
+        caption: opts.caption
+      })
+    }
     markContactAsMessaged(activeContact.value)
   } catch (err: any) {
     console.error('[SEND MEDIA]', err?.response?.data || err.message)
-    messagesStore.updateStatus(msgId, 'error')
+    messagesStore.updateStatus(localId, 'error')
   } finally {
     sending.value = false
   }

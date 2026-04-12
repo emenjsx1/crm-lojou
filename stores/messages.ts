@@ -44,8 +44,8 @@ export const useMessageStore = defineStore('messages', {
       content: string,
       type: Message['type'] = 'text',
       media?: Pick<Message, 'mediaBase64' | 'mediaUrl' | 'mimeType' | 'caption'>
-    ): number {
-      const id = Date.now()
+    ): number | string {
+      const id = 'local_' + Date.now()
       this.messages.push({
         id,
         contact_id: contactId,
@@ -59,8 +59,50 @@ export const useMessageStore = defineStore('messages', {
       return id
     },
 
+    // Salva mensagem enviada no Supabase imediatamente após sucesso da API
+    async addAndSaveOutgoing(params: {
+      localId: number | string,
+      evoId: string,
+      contactId: number | string,
+      content: string,
+      type: Message['type'],
+      mediaUrl?: string,
+      mimeType?: string,
+      caption?: string
+    }) {
+      const client = useSupabaseClient()
+      
+      // Atualiza no store local (troca ID temporário pelo real)
+      const msg = this.messages.find(m => m.id === params.localId)
+      if (msg) {
+        msg.id = params.evoId
+        msg.evo_id = params.evoId
+        msg.status = 'sent'
+      }
+
+      // Persiste no Supabase
+      const payload = {
+        id: params.evoId,
+        contact_id: String(params.contactId),
+        content: params.content,
+        type: params.type,
+        is_outgoing: true,
+        status: 'sent',
+        timestamp: new Date().toISOString(),
+        media_url: params.mediaUrl,
+        mime_type: params.mimeType,
+        caption: params.caption
+      }
+
+      try {
+        await client.from('messages').upsert(payload, { onConflict: 'id' })
+      } catch (e) {
+        console.error('[STORE] Erro ao persistir envio:', e)
+      }
+    },
+
     updateStatus(msgId: number | string, status: Message['status']) {
-      const msg = this.messages.find(m => m.id === msgId)
+      const msg = this.messages.find(m => m.id === msgId || m.evo_id === msgId)
       if (msg) msg.status = status
     },
 
