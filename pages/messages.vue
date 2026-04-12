@@ -196,15 +196,14 @@ onMounted(() => {
     try {
       const updatedChats = await evo.fetchChats()
       if (updatedChats?.length > 0) {
-        console.log(`[POLLING AUDIT] ${updatedChats.length} chats detectados na Evolution.`)
-        // Sincroniza os 8 chats mais recentes para detectar novas mensagens
-        for (const chat of updatedChats.slice(0, 8)) {
+        console.log(`[POLLING AUDIT] Verificando novos eventos em ${Math.min(updatedChats.length, 15)} chats...`)
+        // Sincroniza os 15 chats mais recentes
+        for (const chat of updatedChats.slice(0, 15)) {
           const phone = (chat.id || chat.remoteJid || '').split('@')[0]
           if (!phone || phone.includes('status')) continue
           
-          const msgs = await evo.fetchHistory(phone, 3)
+          const msgs = await evo.fetchHistory(phone, 5) // Aumentado para 5 últimas
           if (msgs.length > 0) {
-            console.log(`[POLLING AUDIT] ${msgs.length} mensagens recuperadas para ${phone}.`)
             let contactId = phone
             const contact = contactsStore.contacts.find(c => {
                const rawVal = c.phone_number || c.phone || c.whatsapp
