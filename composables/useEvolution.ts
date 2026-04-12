@@ -177,15 +177,15 @@ export const useEvolution = () => {
     const phone = formatPhone(rawPhone)
     const jid = phone + '@s.whatsapp.net'
 
-    // Tentar múltiplos formatos de query (compatibilidade V1/V2)
+    // Tentar múltiplos formatos de query (compatibilidade V1/V2 correta)
     const attempts = [
-      () => c.http.post(`/message/findMessages/${c.instance}`, {
+      () => c.http.post(`/chat/findMessages/${c.instance}`, {
         where: { remoteJid: jid }, limit: limit
       }),
-      () => c.http.post(`/message/findMessages/${c.instance}`, {
+      () => c.http.post(`/chat/findMessages/${c.instance}`, {
         where: { key: { remoteJid: jid } }, limit: limit
       }),
-      () => c.http.get(`/message/findMessages/${c.instance}`, {
+      () => c.http.get(`/chat/fetchMessages/${c.instance}`, {
         params: { remoteJid: jid, limit }
       })
     ]
