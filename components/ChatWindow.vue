@@ -2,16 +2,23 @@
   <div class="flex-1 flex flex-col bg-zinc-50 dark:bg-zinc-950 min-w-0">
     <template v-if="contact">
       <!-- Header -->
-      <div class="h-16 px-6 border-b dark:border-zinc-800 bg-white dark:bg-[#09090b] flex items-center justify-between shadow-sm z-10 shrink-0">
-        <div class="flex items-center gap-3">
-          <div class="w-9 h-9 rounded-full bg-[#FF009D]/10 flex items-center justify-center text-[#FF009D] font-bold text-sm uppercase shrink-0">
+      <div class="h-16 px-4 lg:px-6 border-b dark:border-zinc-800 bg-white dark:bg-[#09090b] flex items-center justify-between shadow-sm z-10 shrink-0">
+        <div class="flex items-center gap-2 lg:gap-3">
+          <UButton
+            color="gray"
+            variant="ghost"
+            icon="i-heroicons-chevron-left-20-solid"
+            class="lg:hidden"
+            @click="$emit('back')"
+          />
+          <div class="w-8 h-8 lg:w-9 lg:h-9 rounded-full bg-[#FF009D]/10 flex items-center justify-center text-[#FF009D] font-bold text-xs lg:text-sm uppercase shrink-0">
             {{ getInitials(contact.full_name || contact.firstname || contact.name || 'CN') }}
           </div>
-          <div>
-            <h3 class="font-semibold text-zinc-900 dark:text-white capitalize text-sm">
+          <div class="min-w-0">
+            <h3 class="font-semibold text-zinc-900 dark:text-white capitalize text-xs lg:text-sm truncate">
               {{ (contact.full_name || contact.firstname || contact.name || 'Sem nome').toLowerCase() }}
             </h3>
-            <p class="text-xs text-zinc-500">{{ formattedPhone || contact.email || '—' }}</p>
+            <p class="text-[10px] lg:text-xs text-zinc-500 truncate">{{ formattedPhone || contact.email || '—' }}</p>
           </div>
         </div>
         <div class="flex items-center gap-2">
@@ -267,6 +274,8 @@ const props = defineProps<{
 const emit = defineEmits<{
   (e: 'send', content: string): void
   (e: 'send-media', opts: { type: 'image' | 'audio' | 'video' | 'document', base64: string, filename: string, mimeType: string, caption?: string }): void
+  (e: 'delete-message', msgId: string): void
+  (e: 'back'): void
 }>()
 
 const newMessage = ref('')

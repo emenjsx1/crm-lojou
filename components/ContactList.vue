@@ -1,5 +1,5 @@
 <template>
-  <div class="w-80 border-r dark:border-zinc-800 flex flex-col bg-white dark:bg-[#09090b]">
+  <div class="h-full flex flex-col bg-white dark:bg-[#09090b] border-r dark:border-zinc-800">
     <!-- Search & New Chat -->
     <div class="p-4 border-b dark:border-zinc-800 flex flex-col gap-3">
       <div class="flex justify-between items-center">

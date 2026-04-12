@@ -26,10 +26,12 @@
     </div>
 
     <!-- Interface -->
-    <div class="flex flex-1 bg-white dark:bg-[#09090b] rounded-xl border border-zinc-200 dark:border-zinc-800 overflow-hidden shadow-sm relative">
+    <div class="flex flex-1 bg-white dark:bg-[#09090b] rounded-xl border border-zinc-200 dark:border-zinc-800 overflow-hidden shadow-sm relative h-full">
       <ContactList
         :contacts="activeConversations"
         :active-contact-id="activeContact?.id"
+        class="w-full lg:w-80"
+        :class="{ 'hidden lg:flex': activeContact }"
         @select="selectContact"
         @open-search="showSearchModal = true"
         @new-chat="onNewChat"
@@ -38,9 +40,12 @@
         :contact="activeContact"
         :messages="activeMessages"
         :sending="sending"
+        class="flex-1"
+        :class="{ 'hidden lg:flex': !activeContact }"
         @send="onSendText"
         @send-media="onSendMedia"
         @delete-message="onDeleteMessage"
+        @back="activeContact = null"
       />
     </div>
 
