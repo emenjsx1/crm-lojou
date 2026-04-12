@@ -3,9 +3,11 @@ import { createClient } from '@supabase/supabase-js'
 
 export default defineEventHandler(async (event) => {
   const body = await readBody(event)
-  
   const eventName = (body.event || body.type || '').toUpperCase()
   
+  console.log(`[WEBHOOK AUDIT] Evento recebido: ${eventName}`)
+  console.log(`[WEBHOOK AUDIT] Payload completo:`, JSON.stringify(body, null, 2))
+
   // Lista de eventos que nos interessam para atualizar conversas
   const allowedEvents = [
     'MESSAGES_UPSERT', 
@@ -15,11 +17,16 @@ export default defineEventHandler(async (event) => {
   ]
 
   if (!allowedEvents.includes(eventName)) {
+    console.log(`[WEBHOOK AUDIT] Evento ${eventName} ignorado (fora da lista permitida)`)
     return { status: 'ignored', event: eventName }
   }
 
   const payload = body.data || body
   const message = payload.message || payload
+  
+  if (message?.key) {
+    console.log(`[WEBHOOK AUDIT] Mensagem detectada - ID: ${message.key.id}, fromMe: ${message.key.fromMe}, RemoteJid: ${message.key.remoteJid}`)
+  }
 
   if (!message || !message.key) {
     return { status: 'error', message: 'Invalid payload' }

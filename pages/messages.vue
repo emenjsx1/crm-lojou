@@ -196,6 +196,7 @@ onMounted(() => {
     try {
       const updatedChats = await evo.fetchChats()
       if (updatedChats?.length > 0) {
+        console.log(`[POLLING AUDIT] ${updatedChats.length} chats detectados na Evolution.`)
         // Sincroniza os 8 chats mais recentes para detectar novas mensagens
         for (const chat of updatedChats.slice(0, 8)) {
           const phone = (chat.id || chat.remoteJid || '').split('@')[0]
@@ -203,6 +204,7 @@ onMounted(() => {
           
           const msgs = await evo.fetchHistory(phone, 3)
           if (msgs.length > 0) {
+            console.log(`[POLLING AUDIT] ${msgs.length} mensagens recuperadas para ${phone}.`)
             let contactId = phone
             const contact = contactsStore.contacts.find(c => {
                const cPhone = String(c.phone_number || c.phone || c.whatsapp || '').replace(/\D/g, '')
@@ -210,12 +212,11 @@ onMounted(() => {
             })
             if (contact) contactId = contact.id
             await messagesStore.syncFromEvolution(contactId, msgs)
-            if (contact) markContactAsMessaged(contact)
           }
         }
       }
     } catch (e) {
-      console.warn('[GLOBAL POLL] Falhou:', e)
+      console.warn('[POLLING AUDIT] Falhou:', e)
     }
   }, 5000)
 })

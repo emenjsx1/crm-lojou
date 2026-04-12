@@ -95,9 +95,15 @@ export const useMessageStore = defineStore('messages', {
       }
 
       try {
-        await client.from('messages').upsert(payload, { onConflict: 'id' })
+        console.log(`[STORE AUDIT] Persistindo mensagem ${params.evoId} no Supabase...`)
+        const { data, error } = await client.from('messages').upsert(payload, { onConflict: 'id' }).select()
+        if (error) {
+           console.error('[STORE AUDIT] Falha ao persistir no Supabase:', error)
+        } else {
+           console.log(`[STORE AUDIT] Mensagem ${params.evoId} salva com sucesso.`)
+        }
       } catch (e) {
-        console.error('[STORE] Erro ao persistir envio:', e)
+        console.error('[STORE AUDIT] Exceção ao persistir envio:', e)
       }
     },
 
