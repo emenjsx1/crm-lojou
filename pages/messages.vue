@@ -40,6 +40,7 @@
         :sending="sending"
         @send="onSendText"
         @send-media="onSendMedia"
+        @delete-message="onDeleteMessage"
       />
     </div>
 
@@ -321,8 +322,21 @@ onUnmounted(() => {
   // Certifique-se de limpar o globalPollTimer se ele for definido no escopo acessível
 })
 
+const onDeleteMessage = async (msgId: string) => {
+  try {
+    await evo.deleteMessage(msgId)
+    // Remove do banco e do store
+    const client = useSupabaseClient()
+    await client.from('messages').delete().eq('id', msgId)
+    const idx = messagesStore.messages.findIndex(m => m.id === msgId)
+    if (idx !== -1) messagesStore.messages.splice(idx, 1)
+  } catch (err) {
+    console.error('[DELETE MESSAGE] Erro:', err)
+  }
+}
+
 // Envio de texto
-const onSendText = async (content: string) => {
+const onSendText = async (content: string, quotedId?: string) => {
   if (!activeContact.value || sending.value) return
 
   const rawPhone = activeContact.value.phone_number || activeContact.value.phone || activeContact.value.whatsapp || ''
@@ -337,7 +351,7 @@ const onSendText = async (content: string) => {
   const localId = messagesStore.addOutgoing(activeContact.value.id, finalContent, 'text')
 
   try {
-    const res = await evo.sendText(rawPhone, finalContent)
+    const res = await evo.sendText(rawPhone, finalContent, quotedId)
     
     // Sucesso! Agora pegamos o ID real da Evolution e salvamos IMEDIATAMENTE no Supabase
     const evoId = res.key?.id || res.id
@@ -382,7 +396,7 @@ const onSendMedia = async (opts: {
   })
 
   try {
-    const res = await evo.sendMedia(rawPhone, opts)
+    const res = await evo.sendMedia(rawPhone, { ...opts, quotedId: (opts as any).quotedId })
     
     // Sucesso! Registro imediato no banco
     const evoId = res.key?.id || res.id

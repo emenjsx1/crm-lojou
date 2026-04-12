@@ -47,21 +47,24 @@
                   : 'bg-white dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100 border border-zinc-200 dark:border-zinc-700 rounded-bl-none',
                 msg.status === 'error' ? '!bg-red-500 text-white' : ''
               ]">
+             <!-- Conteúdo da Mensagem -->
+            <div class="message-content-wrapper relative group">
+              <!-- Áudio -->
+              <div v-if="msg.type === 'audio' || msg.type === 'ptt'" class="p-2 min-w-[200px]">
+                <audio 
+                  controls 
+                  class="h-8 max-w-full outline-none"
+                  :src="mediaSource(msg)"
+                ></audio>
+              </div>
 
               <!-- Imagem -->
-              <div v-if="msg.type === 'image'" class="flex flex-col min-w-[200px]">
-                <img
-                  :src="mediaSource(msg)"
-                  class="w-full max-w-sm rounded-t-2xl object-cover cursor-pointer"
-                  @click="openLightbox(mediaSource(msg))"
-                  loading="lazy"
+              <div v-else-if="msg.type === 'image'" class="mb-1">
+                <img 
+                  :src="msg.mediaUrl || (msg.mediaBase64 ? 'data:' + msg.mimeType + ';base64,' + msg.mediaBase64 : '')" 
+                  class="rounded-lg max-w-full max-h-64 cursor-pointer hover:opacity-90 transition"
+                  @click="$emit('preview', msg)"
                 />
-                <div v-if="msg.caption || (msg.content && msg.content !== '[Imagem]' && msg.content !== '[Sticker]')" class="px-3 py-2 text-sm">
-                  {{ msg.caption || msg.content }}
-                </div>
-                <div class="px-3 pb-1.5 flex justify-end items-center gap-1.5 text-[10px] opacity-70">
-                  <span class="font-medium">{{ formatTime(msg.timestamp) }}</span>
-                  <StatusIcon v-if="msg.is_outgoing" :status="msg.status" />
                 </div>
               </div>
 
@@ -118,6 +121,20 @@
                   <StatusIcon v-if="msg.is_outgoing" :status="msg.status" />
                 </div>
               </div>
+
+              <!-- Ações da Mensagem (Hover) -->
+              <div 
+                v-if="msg.id"
+                class="absolute -top-3 opacity-0 group-hover:opacity-100 transition-all flex gap-1 bg-white dark:bg-zinc-800 rounded-lg p-1 shadow-md border border-zinc-200 dark:border-zinc-700 z-20"
+                :class="msg.is_outgoing ? 'right-0' : 'left-0'"
+              >
+                <button @click="onReply(msg)" class="p-1.5 hover:bg-zinc-100 dark:hover:bg-zinc-700 rounded transition text-indigo-500">
+                  <Icon name="ph:chat-dots-bold" class="w-4 h-4" />
+                </button>
+                <button v-if="msg.is_outgoing" @click="onDelete(msg)" class="p-1.5 hover:bg-red-50 dark:hover:bg-red-900/10 rounded transition text-red-500">
+                   <Icon name="ph:trash-bold" class="w-4 h-4" />
+                </button>
+              </div>
             </div>
           </div>
         </template>
@@ -133,6 +150,17 @@
 
       <!-- Input Area -->
       <div class="p-3 bg-white dark:bg-[#09090b] border-t dark:border-zinc-800 shrink-0">
+        <!-- Preview de Resposta -->
+        <div v-if="replyingMessage" class="mb-2 flex items-center gap-2 px-3 py-2 bg-indigo-50 dark:bg-indigo-500/10 border-l-4 border-indigo-500 rounded-r-lg">
+          <div class="flex-1 min-w-0">
+            <p class="text-[10px] font-bold text-indigo-600 dark:text-indigo-400 uppercase">Responder a {{ replyingMessage.is_outgoing ? 'Você' : (contact.full_name || 'Contacto') }}</p>
+            <p class="text-xs text-zinc-600 dark:text-zinc-400 truncate">{{ replyingMessage.content || '[' + replyingMessage.type + ']' }}</p>
+          </div>
+          <button @click="replyingMessage = null" class="text-zinc-400 hover:text-zinc-600">
+            <Icon name="ph:x-bold" class="w-4 h-4" />
+          </button>
+        </div>
+
         <!-- Preview de ficheiro seleccionado -->
         <div v-if="pendingFile" class="mb-2 flex items-center gap-2 px-3 py-2 bg-zinc-100 dark:bg-zinc-800 rounded-lg">
           <Icon :name="pendingFile.type === 'image' ? 'ph:image-bold' : pendingFile.type === 'audio' ? 'ph:music-note-bold' : 'ph:file-bold'" class="w-4 h-4 text-zinc-500" />
@@ -148,10 +176,10 @@
         <div v-if="isRecording" class="mb-2 flex items-center gap-3 px-3 py-2 bg-red-500/10 border border-red-500/20 rounded-lg">
           <div class="w-2 h-2 rounded-full bg-red-500 animate-pulse"></div>
           <span class="text-sm text-red-600 dark:text-red-400 font-medium">A gravar... {{ recordingTime }}s</span>
-          <button @click="stopRecording" class="ml-auto px-3 py-1 bg-red-500 text-white text-xs font-semibold rounded-lg">
+          <button @click="stopRecording" class="ml-auto px-4 py-1.5 bg-red-500 text-white text-xs font-bold rounded-xl shadow-sm hover:bg-red-600 transition-colors">
             Parar e Enviar
           </button>
-          <button @click="cancelRecording" class="text-zinc-400 hover:text-zinc-600 text-xs">Cancelar</button>
+          <button @click="cancelRecording" class="text-zinc-500 hover:text-zinc-700 text-xs font-medium">Cancelar</button>
         </div>
 
         <div class="flex gap-2 items-end">
@@ -159,15 +187,15 @@
           <input type="file" ref="fileInput" accept="image/*,audio/*,video/*,application/pdf,.doc,.docx,.xls,.xlsx" hidden @change="onFileSelected" />
 
           <button @click="fileInput?.click()"
-            :disabled="!contactPhone"
-            class="w-9 h-9 shrink-0 rounded-xl border border-zinc-200 dark:border-zinc-800 text-zinc-500 hover:text-[#FF009D] hover:border-[#FF009D]/50 flex items-center justify-center transition-colors disabled:opacity-30 disabled:cursor-not-allowed">
+            :disabled="!contactPhone || isRecording"
+            class="w-10 h-10 shrink-0 rounded-xl border border-zinc-200 dark:border-zinc-800 text-zinc-500 hover:text-[#FF009D] hover:border-[#FF009D]/50 flex items-center justify-center transition-colors disabled:opacity-30">
             <Icon name="ph:paperclip-bold" class="w-5 h-5" />
           </button>
 
           <!-- Gravar áudio -->
-          <button @click="startRecording"
+          <button @mousedown.prevent="startRecording" @mouseup.prevent="stopRecording"
             :disabled="!contactPhone || isRecording || !!pendingFile"
-            class="w-9 h-9 shrink-0 rounded-xl border border-zinc-200 dark:border-zinc-800 text-zinc-500 hover:text-emerald-500 hover:border-emerald-500/50 flex items-center justify-center transition-colors disabled:opacity-30 disabled:cursor-not-allowed">
+            class="w-10 h-10 shrink-0 rounded-xl border border-zinc-200 dark:border-zinc-800 text-zinc-500 hover:text-emerald-500 hover:border-emerald-500/50 flex items-center justify-center transition-colors disabled:opacity-30">
             <Icon name="ph:microphone-bold" class="w-5 h-5" />
           </button>
 
@@ -176,22 +204,21 @@
             v-model="newMessage"
             rows="1"
             :disabled="!contactPhone || isRecording || !!pendingFile"
-            placeholder="Digite uma mensagem para o WhatsApp..."
-            class="flex-1 px-4 py-2.5 bg-zinc-50 dark:bg-zinc-900/50 border border-zinc-200 dark:border-zinc-800 rounded-xl text-sm text-zinc-900 dark:text-zinc-100 focus:outline-none focus:border-[#FF009D] resize-none transition-all disabled:opacity-40 disabled:cursor-not-allowed"
-            style="max-height: 120px; overflow-y: auto"
+            placeholder="Digite uma mensagem..."
+            class="flex-1 px-4 py-2.5 bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl text-sm text-zinc-900 dark:text-zinc-100 focus:outline-none focus:border-[#FF009D] resize-none max-h-32"
             @keyup.enter.exact.prevent="send"
-            @keydown.enter.shift.exact="newMessage += '\n'"
             @input="autoResize"
           ></textarea>
 
           <!-- Enviar -->
           <button @click="send"
             :disabled="!contactPhone || sending || (!newMessage.trim() && !pendingFile)"
-            class="w-10 h-10 shrink-0 rounded-xl bg-[#FF009D] text-white flex items-center justify-center shadow-md shadow-[#FF009D]/30 hover:bg-[#D90085] transition-colors disabled:opacity-40 disabled:cursor-not-allowed">
+            class="w-10 h-10 shrink-0 rounded-xl bg-[#FF009D] text-white flex items-center justify-center shadow-lg shadow-[#FF009D]/20 hover:bg-[#D90085] transition-all disabled:opacity-40">
             <Icon v-if="sending" name="ph:spinner-gap-bold" class="w-5 h-5 animate-spin" />
             <Icon v-else name="ph:paper-plane-right-bold" class="w-5 h-5" />
           </button>
         </div>
+      </div>
       </div>
     </template>
 
@@ -332,17 +359,31 @@ const groupedMessages = computed(() => {
   return result
 })
 
-// Fonte de media: base64 tem prioridade sobre URL
+// Fonte de media: usa o PROXY para contornar CORS e AUTH
 const mediaSource = (msg: Message) => {
   if (msg.mediaBase64) {
     const mime = msg.mimeType || (msg.type === 'image' ? 'image/jpeg' : msg.type === 'audio' ? 'audio/ogg' : 'application/octet-stream')
     return `data:${mime};base64,${msg.mediaBase64}`
   }
-  return msg.mediaUrl || ''
+  
+  if (msg.mediaUrl) {
+    const apiKey = localStorage.getItem('evolution_api_key') || ''
+    return `/api/media?url=${encodeURIComponent(msg.mediaUrl)}&key=${apiKey}`
+  }
+  
+  return ''
 }
 
-const openLightbox = (src: string) => {
-  if (src) lightboxSrc.value = src
+const replyingMessage = ref<Message | null>(null)
+
+const onReply = (msg: Message) => {
+  replyingMessage.value = msg
+}
+
+const onDelete = async (msg: Message) => {
+  if (confirm('Deseja apagar esta mensagem para todos?')) {
+     emit('delete-message', msg.id)
+  }
 }
 
 // Enviar mensagem
