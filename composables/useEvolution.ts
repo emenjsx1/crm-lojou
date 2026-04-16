@@ -193,9 +193,20 @@ export const useEvolution = () => {
         const raw = data?.messages?.records || data?.messages || data?.data || data?.records || (Array.isArray(data) ? data : [])
         
         if (Array.isArray(raw) && raw.length > 0) {
-          const parsed = raw.map(parseRecord).filter(Boolean) as EvoMessage[]
-          console.log(`[EVO] Sync para ${phone}: ${parsed.length} mensagens encontradas.`)
-          return parsed
+          const parsed = raw
+            .map(parseRecord)
+            .filter(Boolean) as EvoMessage[]
+
+          // ── FILTRO CRÍTICO: só aceitar mensagens do JID exacto ──────────
+          // Sem este filtro, mensagens de outros contactos entram no chat errado
+          const filtered = parsed.filter(m => m.remoteJid === jid)
+          
+          if (filtered.length < parsed.length) {
+            console.warn(`[EVO] ⚠️  Removidas ${parsed.length - filtered.length} mensagens de outros JIDs (de ${parsed.length} total) para ${jid}`)
+          }
+
+          console.log(`[EVO] Sync para ${jid}: ${filtered.length} mensagens válidas.`)
+          return filtered
         }
       } catch (e: any) {
         console.warn(`[EVO] Tentativa falhou para ${phone}:`, e.message)
