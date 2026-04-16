@@ -20,12 +20,13 @@ export const useEvolution = () => {
   // Número moçambicano: 9 dígitos começando por 8 → adiciona 258
   const formatPhone = (raw: string): string => {
     let d = raw.replace(/\D/g, '')
-    if (d.startsWith('00')) d = d.slice(2)
-    if (d.startsWith('0')) d = d.slice(1)
-    
-    // Se tiver 9 dígitos (Moçambique) e não começar com 258, adiciona
-    if (d.length === 9 && (d.startsWith('82') || d.startsWith('83') || d.startsWith('84') || d.startsWith('85') || d.startsWith('86') || d.startsWith('87'))) {
-      d = '258' + d
+    // Se começar com 258, remover para normalizar internamente
+    if (d.startsWith('258') && d.length > 9) {
+      d = d.slice(3)
+    }
+    // Para envio/fetch na Evolution, garantimos o 258 se for Moçambique (9 dígitos começando por 8)
+    if (d.length === 9 && d.startsWith('8')) {
+      return '258' + d
     }
     return d
   }

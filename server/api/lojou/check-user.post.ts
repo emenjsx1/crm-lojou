@@ -22,8 +22,9 @@ export default defineEventHandler(async (event) => {
   // Normalização Mozambique: strip prefixo 258 para comparação exacta com Lojou
   // O Lojou guarda "855253617", o WhatsApp envia "258855253617"
   const normalizePhone = (p: string): string => {
-    const s = String(p).trim().replace(/\D/g, '')
-    return s.startsWith('258') && s.length > 9 ? s.slice(3) : s
+    let s = String(p).trim().replace(/\D/g, '')
+    if (s.startsWith('258')) s = s.slice(3)
+    return s
   }
   const phoneLocal = normalizePhone(phone)
 
@@ -46,10 +47,11 @@ export default defineEventHandler(async (event) => {
   }
 
   try {
+    // Pesquisar pelo número local para garantir match se o Lojou não indexar o DDI
     const lojouRes = await axios.get('https://api.lojou.app/api/admin/users', {
-      params:  { search: phone, is_paginate: 0 },
+      params:  { search: phoneLocal, is_paginate: 0 },
       headers: { Authorization: `Bearer ${adminToken}` },
-      timeout: 6000
+      timeout: 5000
     })
 
     const users: any[] = lojouRes.data?.users || lojouRes.data?.data || []

@@ -221,8 +221,12 @@ onMounted(async () => {
           const phone = (chat.id || chat.remoteJid || '').split('@')[0]
           if (!phone || phone.includes('status') || phone.includes('@')) continue
 
-          // Normaliza o telefone do chat para comparação
-          const normalizePhone = (raw: string) => String(raw).replace(/\D/g, '')
+          // Normalização agressiva: drop prefixo 258 se existir
+          const normalizePhone = (raw: string) => {
+            let s = String(raw).replace(/\D/g, '')
+            if (s.startsWith('258') && s.length > 9) s = s.slice(3)
+            return s
+          }
           const chatPhone = normalizePhone(phone)
           if (chatPhone.length < 7) continue
 
@@ -369,16 +373,43 @@ const recentChats = ref<any[]>([])
 
 const loadRecentChats = async () => {
   if (!supabase) supabase = useSupabaseClient()
-  // Buscar todos os contactos que têm mensagens, ordenados pelo timestamp da mensagem mais recente
-  const { data: rows } = await supabase
+  
+  // 1. Tentar carregar da tabela de contatos
+  const { data: contactRows } = await supabase
     .from('contacts')
     .select('*, users(*)')
     .order('created_at', { ascending: false })
     .limit(50)
   
-  if (rows && rows.length > 0) {
-    // Para cada contacto, buscar a última mensagem
-    const enriched = await Promise.all(rows.map(async (c: any) => {
+  let merged: any[] = contactRows || []
+
+  // 2. Fallback/Complemento: Se não houver contatos ou poucos contatos, 
+  // buscar pelos JIDs das mensagens recentes (garante que chats "órfãos" apareçam)
+  if (merged.length < 15) {
+    const { data: recentMsgs } = await supabase
+      .from('messages')
+      .select('remote_jid')
+      .order('timestamp', { ascending: false })
+      .limit(100)
+    
+    if (recentMsgs) {
+      const uniqueJids = [...new Set(recentMsgs.map(m => m.remote_jid).filter(Boolean))]
+      for (const jid of uniqueJids) {
+        if (!merged.find(c => c.remote_jid === jid)) {
+          merged.push({ 
+            id: 'orphan_' + jid, 
+            remote_jid: jid, 
+            phone: jid.split('@')[0],
+            name: jid.split('@')[0],
+            metadata: { source: 'orphan' } 
+          })
+        }
+      }
+    }
+  }
+
+  if (merged.length > 0) {
+    const enriched = await Promise.all(merged.map(async (c: any) => {
       const { data: lastMsg } = await supabase
         .from('messages')
         .select('content, timestamp, is_outgoing')
@@ -394,7 +425,6 @@ const loadRecentChats = async () => {
       }
     }))
     
-    // Ordenar por mensagem mais recente
     recentChats.value = enriched.sort(
       (a: any, b: any) => new Date(b.lastMessageTime).getTime() - new Date(a.lastMessageTime).getTime()
     )

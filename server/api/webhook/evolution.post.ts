@@ -11,7 +11,9 @@ import axios from 'axios'
 
 export default defineEventHandler(async (event) => {
   const body = await readBody(event)
-  const eventName = (body.event || body.type || '').toUpperCase()
+  const rawEvent = (body.event || body.type || '').toUpperCase()
+  // Replace dots with underscores to handle 'messages.upsert' -> 'MESSAGES_UPSERT'
+  const eventName = rawEvent.replace(/\./g, '_')
 
   const allowedEvents = ['MESSAGES_UPSERT', 'MESSAGES_UPDATE', 'MESSAGES_SET', 'SEND_MESSAGE']
   if (!allowedEvents.includes(eventName)) {
@@ -20,9 +22,11 @@ export default defineEventHandler(async (event) => {
 
   // ── 1. Extrair identificadores únicos ──────────────────────────────────
   const payload  = body.data || body
-  const message  = payload.message || payload
+  // Em algumas versões a mensagem está em payload.message, noutras o payload É a mensagem
+  const message  = (payload.message && payload.key) ? payload : (payload.message || payload)
 
-  if (!message?.key) {
+  if (!message || !message.key) {
+    console.error('[WEBHOOK] Missing key in payload:', JSON.stringify(body).substring(0, 200))
     return { status: 'error', reason: 'missing_key' }
   }
 
@@ -41,11 +45,12 @@ export default defineEventHandler(async (event) => {
     return { status: 'ignored', reason: 'invalid_phone' }
   }
 
-  // Helper: strip paese-code 258 para comparar com Lojou (que guarda sem prefixo)
-  // Match exacto após normalização — nunca includes/startsWith/LIKE
+  // Helper: Strip everything that isn't a digit, then drop any '258' prefix 
+  // ensuring matching works regardless of spaces, length, or country code formatting.
   const normalizePhone = (p: string): string => {
-    const s = String(p).trim().replace(/\D/g, '')
-    return s.startsWith('258') && s.length > 9 ? s.slice(3) : s
+    let s = String(p).trim().replace(/\D/g, '')
+    if (s.startsWith('258')) s = s.slice(3)
+    return s
   }
   const phoneLocal = normalizePhone(phone) // ex: "855253617"
 
@@ -85,8 +90,9 @@ export default defineEventHandler(async (event) => {
 
     if (tokenValid) {
       try {
+        // Pesquisar pelo número LOCAL (sem 258) para aumentar chances de match na API da Lojou
         const lojouRes = await axios.get('https://api.lojou.app/api/admin/users', {
-          params: { search: phone, is_paginate: 0 },
+          params: { search: phoneLocal, is_paginate: 0 },
           headers: { Authorization: `Bearer ${adminToken}` },
           timeout: 5000
         })
