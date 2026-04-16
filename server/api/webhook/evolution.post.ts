@@ -35,11 +35,19 @@ export default defineEventHandler(async (event) => {
   }
 
   // phone = número EXACTO tal como o WhatsApp envia (ex: 258855253617)
-  // NUNCA remover prefixo, NUNCA modificar
+  // NUNCA remover prefixo para armazenar, mas normalizar para comparação com Lojou
   const phone = remoteJid.split('@')[0]
   if (!phone || !/^\d+$/.test(phone)) {
     return { status: 'ignored', reason: 'invalid_phone' }
   }
+
+  // Helper: strip paese-code 258 para comparar com Lojou (que guarda sem prefixo)
+  // Match exacto após normalização — nunca includes/startsWith/LIKE
+  const normalizePhone = (p: string): string => {
+    const s = String(p).trim().replace(/\D/g, '')
+    return s.startsWith('258') && s.length > 9 ? s.slice(3) : s
+  }
+  const phoneLocal = normalizePhone(phone) // ex: "855253617"
 
   const pushName  = payload.pushName || message.pushName || phone
   const isOutgoing = !!message.key.fromMe || eventName === 'SEND_MESSAGE'
@@ -85,10 +93,12 @@ export default defineEventHandler(async (event) => {
 
         const users: any[] = lojouRes.data?.users || lojouRes.data?.data || []
 
-        // ── MATCH EXACTO — NUNCA includes/startsWith/LIKE ───────────────
+        // ── MATCH EXACTO após normalização ─────────────────────────────
+        // Lojou guarda "855253617", WhatsApp envia "258855253617"
+        // Normalizamos ambos removendo o prefixo 258 → comparação exacta
         lojouUser = users.find((u: any) => {
-          const lojouPhone = String(u.phone_number || u.phone || '').trim()
-          return lojouPhone === phone   // ← EXACTO
+          const lojouPhone = normalizePhone(String(u.phone_number || u.phone || ''))
+          return lojouPhone === phoneLocal && lojouPhone.length > 0
         }) ?? null
 
         if (lojouUser) {

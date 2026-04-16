@@ -13,11 +13,19 @@ import axios from 'axios'
 
 export default defineEventHandler(async (event) => {
   const body = await readBody(event)
-  const phone = String(body?.phone || '').trim()
+  const phone = String(body?.phone || '').trim().replace(/\D/g, '')
 
-  if (!phone || !/^\d+$/.test(phone)) {
+  if (!phone || phone.length < 6) {
     return { found: false, error: 'invalid_phone' }
   }
+
+  // Normalização Mozambique: strip prefixo 258 para comparação exacta com Lojou
+  // O Lojou guarda "855253617", o WhatsApp envia "258855253617"
+  const normalizePhone = (p: string): string => {
+    const s = String(p).trim().replace(/\D/g, '')
+    return s.startsWith('258') && s.length > 9 ? s.slice(3) : s
+  }
+  const phoneLocal = normalizePhone(phone)
 
   const config  = useRuntimeConfig()
   const supabase = createClient(
@@ -46,10 +54,11 @@ export default defineEventHandler(async (event) => {
 
     const users: any[] = lojouRes.data?.users || lojouRes.data?.data || []
 
-    // MATCH EXACTO — nunca includes/startsWith/LIKE
+    // MATCH EXACTO após normalização
+    // Lojou guarda "855253617", WhatsApp envia "258855253617"
     const match = users.find((u: any) => {
-      const lojouPhone = String(u.phone_number || u.phone || '').trim()
-      return lojouPhone === phone
+      const lojouPhone = normalizePhone(String(u.phone_number || u.phone || ''))
+      return lojouPhone === phoneLocal && lojouPhone.length > 0
     }) ?? null
 
     if (!match) {
