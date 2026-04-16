@@ -154,9 +154,17 @@ export const useEvolution = () => {
       }
     }
 
+    let remoteJid = r.key.remoteJid || ''
+    if (remoteJid.includes('@s.whatsapp.net')) {
+      const rawNum = remoteJid.split('@')[0]
+      if (rawNum.length === 9 && rawNum.startsWith('8')) {
+        remoteJid = '258' + rawNum + '@s.whatsapp.net'
+      }
+    }
+
     return {
       evoId: r.key.id,
-      remoteJid: r.key.remoteJid || '',
+      remoteJid,
       fromMe: Boolean(r.key.fromMe),
       content, 
       type,

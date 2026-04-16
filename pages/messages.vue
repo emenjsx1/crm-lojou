@@ -410,16 +410,26 @@ const loadRecentChats = async () => {
 
   if (merged.length > 0) {
     const enriched = await Promise.all(merged.map(async (c: any) => {
+      // Garantir JID normalizado para busca de mensagens
+      let jid = c.remote_jid || ''
+      if (jid.includes('@s.whatsapp.net')) {
+        const rawNum = jid.split('@')[0]
+        if (rawNum.length === 9 && rawNum.startsWith('8')) {
+          jid = '258' + rawNum + '@s.whatsapp.net'
+        }
+      }
+
       const { data: lastMsg } = await supabase
         .from('messages')
         .select('content, timestamp, is_outgoing')
-        .eq('remote_jid', c.remote_jid)
+        .eq('remote_jid', jid)
         .order('timestamp', { ascending: false })
         .limit(1)
         .maybeSingle()
       
       return {
         ...c,
+        remote_jid: jid,
         lastMessage: lastMsg?.content || '...',
         lastMessageTime: lastMsg?.timestamp || c.created_at || new Date().toISOString()
       }

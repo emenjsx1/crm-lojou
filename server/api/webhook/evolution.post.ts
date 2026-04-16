@@ -30,16 +30,25 @@ export default defineEventHandler(async (event) => {
     return { status: 'error', reason: 'missing_key' }
   }
 
-  const remoteJid = message.key.remoteJid || ''
+  let remoteJid = message.key.remoteJid || ''
   const messageId = message.key.id        || ''
 
+  // ── NORMALIZAÇÃO DE JID (Moçambique) ───────────────────────────────────
+  // Para evitar duplicados (ex: 25885... vs 85...), forçamos sempre o DDI 258
+  if (remoteJid.includes('@s.whatsapp.net')) {
+    const rawNum = remoteJid.split('@')[0]
+    if (rawNum.length === 9 && rawNum.startsWith('8')) {
+      remoteJid = '258' + rawNum + '@s.whatsapp.net'
+    }
+  }
+
+  // phone = número EXACTO tal como o WhatsApp envia (ex: 258855253617)
+  // NUNCA remover prefixo para armazenar, mas normalizar para comparação com Lojou
   // Ignorar grupos e status
   if (!remoteJid || remoteJid.endsWith('@g.us') || remoteJid.startsWith('status@')) {
     return { status: 'ignored', reason: 'group_or_status' }
   }
 
-  // phone = número EXACTO tal como o WhatsApp envia (ex: 258855253617)
-  // NUNCA remover prefixo para armazenar, mas normalizar para comparação com Lojou
   const phone = remoteJid.split('@')[0]
   if (!phone || !/^\d+$/.test(phone)) {
     return { status: 'ignored', reason: 'invalid_phone' }
