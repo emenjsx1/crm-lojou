@@ -203,7 +203,7 @@ let channel: any = null
 let supabase: any = null
 const POLL_INTERVAL = 4000 // 4 segundos
 
-onMounted(() => {
+onMounted(async () => {
   if (typeof window !== 'undefined') {
     agentSignature.value = localStorage.getItem('lojou_agent_signature') || ''
   }
