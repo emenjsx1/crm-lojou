@@ -90,27 +90,31 @@ export default defineEventHandler(async (event) => {
 
     if (tokenValid) {
       try {
-        // Pesquisar pelo número LOCAL (sem 258) para aumentar chances de match na API da Lojou
-        const lojouRes = await axios.get('https://api.lojou.app/api/admin/users', {
-          params: { search: phoneLocal, is_paginate: 0 },
-          headers: { Authorization: `Bearer ${adminToken}` },
-          timeout: 5000
-        })
+        // Tentar múltiplos formatos de busca na Lojou para garantir o match
+        const searchTerms = [phoneLocal, phone] // phoneLocal (855...), phone (258855...)
+        
+        for (const term of searchTerms) {
+          const lojouRes = await axios.get('https://api.lojou.app/api/admin/users', {
+            params: { search: term, is_paginate: 0 },
+            headers: { Authorization: `Bearer ${adminToken}` },
+            timeout: 5000
+          })
 
-        const users: any[] = lojouRes.data?.users || lojouRes.data?.data || []
+          const users: any[] = lojouRes.data?.users || lojouRes.data?.data || []
+          
+          // MATCH EXATO após normalização
+          lojouUser = users.find((u: any) => {
+            const lojouPhone = normalizePhone(String(u.phone_number || u.phone || ''))
+            return lojouPhone === phoneLocal && lojouPhone.length > 0
+          }) ?? null
 
-        // ── MATCH EXACTO após normalização ─────────────────────────────
-        // Lojou guarda "855253617", WhatsApp envia "258855253617"
-        // Normalizamos ambos removendo o prefixo 258 → comparação exacta
-        lojouUser = users.find((u: any) => {
-          const lojouPhone = normalizePhone(String(u.phone_number || u.phone || ''))
-          return lojouPhone === phoneLocal && lojouPhone.length > 0
-        }) ?? null
+          if (lojouUser) break // Parar se encontrarmos
+        }
 
         if (lojouUser) {
-          console.log(`[WEBHOOK] ✅ Usuário Lojou encontrado: ${lojouUser.name} (${phone})`)
+          console.log(`[WEBHOOK] ✅ Usuário Lojou encontrado: ${lojouUser.name}`)
         } else {
-          console.log(`[WEBHOOK] ⚠️  Número ${phone} NÃO existe na Lojou → Lead`)
+          console.log(`[WEBHOOK] ⚠️  Número ${phoneLocal} NÃO encontrado após múltiplas tentativas`)
         }
       } catch (err: any) {
         console.error('[WEBHOOK] Erro ao consultar Lojou:', err.message)

@@ -47,21 +47,25 @@ export default defineEventHandler(async (event) => {
   }
 
   try {
-    // Pesquisar pelo número local para garantir match se o Lojou não indexar o DDI
-    const lojouRes = await axios.get('https://api.lojou.app/api/admin/users', {
-      params:  { search: phoneLocal, is_paginate: 0 },
-      headers: { Authorization: `Bearer ${adminToken}` },
-      timeout: 5000
-    })
+    const searchTerms = [phoneLocal, phone]
+    let match: any = null
 
-    const users: any[] = lojouRes.data?.users || lojouRes.data?.data || []
+    for (const term of searchTerms) {
+      const lojouRes = await axios.get('https://api.lojou.app/api/admin/users', {
+        params: { search: term, is_paginate: 0 },
+        headers: { Authorization: `Bearer ${adminToken}` },
+        timeout: 5000
+      })
 
-    // MATCH EXACTO após normalização
-    // Lojou guarda "855253617", WhatsApp envia "258855253617"
-    const match = users.find((u: any) => {
-      const lojouPhone = normalizePhone(String(u.phone_number || u.phone || ''))
-      return lojouPhone === phoneLocal && lojouPhone.length > 0
-    }) ?? null
+      const users: any[] = lojouRes.data?.users || lojouRes.data?.data || []
+
+      match = users.find((u: any) => {
+        const lojouPhone = normalizePhone(String(u.phone_number || u.phone || ''))
+        return lojouPhone === phoneLocal && lojouPhone.length > 0
+      }) ?? null
+
+      if (match) break
+    }
 
     if (!match) {
       return { found: false, phone }
