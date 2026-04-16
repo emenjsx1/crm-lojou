@@ -192,6 +192,8 @@ let debounceTimer: any = null
 // Polling
 let pollTimer: any = null
 let globalPollTimer: any = null
+let channel: any = null
+let supabase: any = null
 const POLL_INTERVAL = 4000 // 4 segundos
 
 onMounted(() => {
@@ -254,12 +256,43 @@ onMounted(() => {
     } catch (e) {
       console.warn('[POLLING AUDIT] Falhou:', e)
     }
-  }, 5000)
+  }, 10000) // Aumentado para 10s já que agora temos Realtime para agilidade
+
+  // SUPABASE REALTIME SUBSCRIPTION
+  supabase = useSupabaseClient()
+  channel = supabase.channel('messages-realtime')
+    .on('postgres_changes', { 
+      event: 'INSERT', 
+      schema: 'public', 
+      table: 'messages' 
+    }, async (payload) => {
+      const newMsg = payload.new
+      console.log('[REALTIME] Nova mensagem recebida:', newMsg.id)
+
+      // 1. É para o contato ativo?
+      if (activeContact.value && String(newMsg.contact_id) === String(activeContact.value.id)) {
+        await messagesStore.fetchFromSupabase(activeContact.value.id)
+      } else {
+        // 2. É para algum contato que temos na lista de recentes?
+        const matched = contactsStore.contacts.find(c => {
+          const rawVal = c.phone_number || c.phone || (c as any).whatsapp || (c as any).phone_whatsapp
+          return String(c.id) === String(newMsg.contact_id) || (rawVal && String(rawVal).includes(String(newMsg.contact_id)))
+        })
+        
+        if (matched) {
+          markContactAsMessaged(matched)
+        }
+      }
+    })
+    .subscribe()
 })
 
 onUnmounted(() => {
   clearInterval(pollTimer)
   clearInterval(globalPollTimer)
+  if (channel) {
+    channel.unsubscribe()
+  }
 })
 
 const markContactAsMessaged = (contact: any) => {

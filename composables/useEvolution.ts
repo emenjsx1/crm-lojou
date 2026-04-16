@@ -256,11 +256,27 @@ export const useEvolution = () => {
   }
 
   const configureWebhook = async (webhookUrl: string) => {
-    // ... (unmodified)
+    const c = await makeClient()
+    if (!c) throw new Error('Evolution não configurado')
+    const res = await c.http.post(`/instance/setWebhook/${c.instance}`, {
+      url: webhookUrl,
+      enabled: true,
+      events: ['MESSAGES_UPSERT', 'MESSAGES_UPDATE', 'SEND_MESSAGE']
+    })
+    return res.data
   }
 
   const fetchChats = async (): Promise<any[]> => {
-    // ... (unmodified)
+    const c = await makeClient()
+    if (!c) return []
+    try {
+      // Evolution v2 endpoint
+      const res = await c.http.get(`/chat/getChats/${c.instance}`)
+      return res.data || []
+    } catch (e) {
+      console.warn('[EVO] Falha ao buscar chats:', e)
+      return []
+    }
   }
 
   return { 

@@ -54,93 +54,89 @@
                   : 'bg-white dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100 border border-zinc-200 dark:border-zinc-700 rounded-bl-none',
                 msg.status === 'error' ? '!bg-red-500 text-white' : ''
               ]">
-             <!-- Conteúdo da Mensagem -->
-            <div class="message-content-wrapper relative group">
-              <!-- Áudio -->
-              <div v-if="msg.type === 'audio' || msg.type === 'ptt'" class="p-2 min-w-[200px]">
-                <audio 
-                  controls 
-                  class="h-8 max-w-full outline-none"
-                  :src="mediaSource(msg)"
-                ></audio>
-              </div>
+              <!-- Conteúdo da Mensagem -->
+              <div class="message-content-wrapper relative group">
+                <!-- Áudio -->
+                <div v-if="msg.type === 'audio' || msg.type === 'ptt'" class="px-3 py-3 flex flex-col gap-1.5 min-w-[240px]">
+                  <div class="flex items-center gap-3">
+                     <div class="w-8 h-8 rounded-full bg-white/20 flex items-center justify-center shrink-0">
+                        <Icon name="ph:microphone-fill" class="w-4 h-4" />
+                     </div>
+                     <audio controls class="w-full h-8 rounded shrink-0" preload="metadata" style="filter: invert(0.9) hue-rotate(180deg)">
+                       <source :src="mediaSource(msg)" :type="msg.mimeType || 'audio/ogg'" />
+                     </audio>
+                  </div>
+                  <div class="flex justify-end items-center gap-1.5 text-[10px] opacity-70">
+                    <span class="font-medium">{{ formatTime(msg.timestamp) }}</span>
+                    <StatusIcon v-if="msg.is_outgoing" :status="msg.status" />
+                  </div>
+                </div>
 
-              <!-- Imagem -->
-              <div v-else-if="msg.type === 'image'" class="mb-1">
-                <img 
-                  :src="msg.mediaUrl || (msg.mediaBase64 ? 'data:' + msg.mimeType + ';base64,' + msg.mediaBase64 : '')" 
-                  class="rounded-lg max-w-full max-h-64 cursor-pointer hover:opacity-90 transition"
-                  @click="$emit('preview', msg)"
-                />
+                <!-- Imagem -->
+                <div v-else-if="msg.type === 'image'" class="mb-1">
+                  <img 
+                    :src="msg.mediaUrl || (msg.mediaBase64 ? 'data:' + msg.mimeType + ';base64,' + msg.mediaBase64 : '')" 
+                    class="rounded-lg max-w-full max-h-64 cursor-pointer hover:opacity-90 transition"
+                    @click="$emit('preview', msg)"
+                  />
+                  <div v-if="msg.caption" class="px-3 py-2 text-sm">{{ msg.caption }}</div>
+                  <div class="px-3 pb-1.5 flex justify-end items-center gap-1.5 text-[10px] opacity-70">
+                    <span class="font-medium">{{ formatTime(msg.timestamp) }}</span>
+                    <StatusIcon v-if="msg.is_outgoing" :status="msg.status" />
+                  </div>
                 </div>
-              </div>
 
-              <!-- Áudio -->
-              <div v-else-if="msg.type === 'audio'" class="px-3 py-3 flex flex-col gap-1.5 min-w-[240px]">
-                <div class="flex items-center gap-3">
-                   <div class="w-8 h-8 rounded-full bg-white/20 flex items-center justify-center shrink-0">
-                      <Icon name="ph:microphone-fill" class="w-4 h-4" />
-                   </div>
-                   <audio controls class="w-full h-8 rounded shrink-0" preload="metadata" style="filter: invert(0.9) hue-rotate(180deg)">
-                     <source :src="mediaSource(msg)" :type="msg.mimeType || 'audio/ogg'" />
-                   </audio>
+                <!-- Vídeo -->
+                <div v-else-if="msg.type === 'video'" class="flex flex-col min-w-[200px]">
+                  <video controls class="w-full max-w-sm rounded-t-2xl">
+                    <source :src="mediaSource(msg)" :type="msg.mimeType || 'video/mp4'" />
+                  </video>
+                  <div v-if="msg.caption" class="px-3 py-2 text-sm">{{ msg.caption }}</div>
+                  <div class="px-3 pb-1.5 flex justify-end items-center gap-1.5 text-[10px] opacity-70">
+                    <span class="font-medium">{{ formatTime(msg.timestamp) }}</span>
+                    <StatusIcon v-if="msg.is_outgoing" :status="msg.status" />
+                  </div>
                 </div>
-                <div class="flex justify-end items-center gap-1.5 text-[10px] opacity-70">
-                  <span class="font-medium">{{ formatTime(msg.timestamp) }}</span>
-                  <StatusIcon v-if="msg.is_outgoing" :status="msg.status" />
-                </div>
-              </div>
 
-              <!-- Vídeo -->
-              <div v-else-if="msg.type === 'video'" class="flex flex-col min-w-[200px]">
-                <video controls class="w-full max-w-sm rounded-t-2xl">
-                  <source :src="mediaSource(msg)" :type="msg.mimeType || 'video/mp4'" />
-                </video>
-                <div v-if="msg.caption" class="px-3 py-2 text-sm">{{ msg.caption }}</div>
-                <div class="px-3 pb-1.5 flex justify-end items-center gap-1.5 text-[10px] opacity-70">
-                  <span class="font-medium">{{ formatTime(msg.timestamp) }}</span>
-                  <StatusIcon v-if="msg.is_outgoing" :status="msg.status" />
+                <!-- Documento -->
+                <div v-else-if="msg.type === 'document'" class="px-4 py-3 flex items-center gap-4 min-w-[220px]">
+                  <div class="w-10 h-10 rounded-xl bg-white/10 flex items-center justify-center shrink-0">
+                     <Icon name="ph:file-pdf-bold" v-if="msg.mimeType?.includes('pdf')" class="w-6 h-6" />
+                     <Icon name="ph:file-bold" v-else class="w-6 h-6" />
+                  </div>
+                  <div class="flex-1 min-w-0">
+                    <p class="text-sm font-semibold truncate">{{ msg.content }}</p>
+                    <a v-if="msg.mediaUrl || msg.mediaBase64" :href="mediaSource(msg)" target="_blank"
+                      class="text-[11px] underline opacity-80 decoration-dotted hover:opacity-100 transition-opacity">Visualizar / Baixar</a>
+                  </div>
+                  <div class="flex flex-col items-end gap-1 shrink-0">
+                    <span class="text-[10px] font-medium opacity-70">{{ formatTime(msg.timestamp) }}</span>
+                    <StatusIcon v-if="msg.is_outgoing" :status="msg.status" />
+                  </div>
                 </div>
-              </div>
 
-              <!-- Documento -->
-              <div v-else-if="msg.type === 'document'" class="px-4 py-3 flex items-center gap-4 min-w-[220px]">
-                <div class="w-10 h-10 rounded-xl bg-white/10 flex items-center justify-center shrink-0">
-                   <Icon name="ph:file-pdf-bold" v-if="msg.mimeType?.includes('pdf')" class="w-6 h-6" />
-                   <Icon name="ph:file-bold" v-else class="w-6 h-6" />
+                <!-- Texto -->
+                <div v-else class="px-4 py-3">
+                  <p class="text-[13.5px] leading-relaxed whitespace-pre-wrap">{{ msg.content }}</p>
+                  <div class="flex justify-end items-center gap-1.5 mt-1 text-[10px] opacity-75">
+                    <span class="font-medium">{{ formatTime(msg.timestamp) }}</span>
+                    <StatusIcon v-if="msg.is_outgoing" :status="msg.status" />
+                  </div>
                 </div>
-                <div class="flex-1 min-w-0">
-                  <p class="text-sm font-semibold truncate">{{ msg.content }}</p>
-                  <a v-if="msg.mediaUrl || msg.mediaBase64" :href="mediaSource(msg)" target="_blank"
-                    class="text-[11px] underline opacity-80 decoration-dotted hover:opacity-100 transition-opacity">Visualizar / Baixar</a>
-                </div>
-                <div class="flex flex-col items-end gap-1 shrink-0">
-                  <span class="text-[10px] font-medium opacity-70">{{ formatTime(msg.timestamp) }}</span>
-                  <StatusIcon v-if="msg.is_outgoing" :status="msg.status" />
-                </div>
-              </div>
 
-              <!-- Texto -->
-              <div v-else class="px-4 py-3">
-                <p class="text-[13.5px] leading-relaxed whitespace-pre-wrap">{{ msg.content }}</p>
-                <div class="flex justify-end items-center gap-1.5 mt-1 text-[10px] opacity-75">
-                  <span class="font-medium">{{ formatTime(msg.timestamp) }}</span>
-                  <StatusIcon v-if="msg.is_outgoing" :status="msg.status" />
+                <!-- Ações da Mensagem (Hover) -->
+                <div 
+                  v-if="msg.id"
+                  class="absolute -top-3 opacity-0 group-hover:opacity-100 transition-all flex gap-1 bg-white dark:bg-zinc-800 rounded-lg p-1 shadow-md border border-zinc-200 dark:border-zinc-700 z-20"
+                  :class="msg.is_outgoing ? 'right-0' : 'left-0'"
+                >
+                  <button @click="onReply(msg)" class="p-1.5 hover:bg-zinc-100 dark:hover:bg-zinc-700 rounded transition text-indigo-500">
+                    <Icon name="ph:chat-dots-bold" class="w-4 h-4" />
+                  </button>
+                  <button v-if="msg.is_outgoing" @click="onDelete(msg)" class="p-1.5 hover:bg-red-50 dark:hover:bg-red-900/10 rounded transition text-red-500">
+                     <Icon name="ph:trash-bold" class="w-4 h-4" />
+                  </button>
                 </div>
-              </div>
-
-              <!-- Ações da Mensagem (Hover) -->
-              <div 
-                v-if="msg.id"
-                class="absolute -top-3 opacity-0 group-hover:opacity-100 transition-all flex gap-1 bg-white dark:bg-zinc-800 rounded-lg p-1 shadow-md border border-zinc-200 dark:border-zinc-700 z-20"
-                :class="msg.is_outgoing ? 'right-0' : 'left-0'"
-              >
-                <button @click="onReply(msg)" class="p-1.5 hover:bg-zinc-100 dark:hover:bg-zinc-700 rounded transition text-indigo-500">
-                  <Icon name="ph:chat-dots-bold" class="w-4 h-4" />
-                </button>
-                <button v-if="msg.is_outgoing" @click="onDelete(msg)" class="p-1.5 hover:bg-red-50 dark:hover:bg-red-900/10 rounded transition text-red-500">
-                   <Icon name="ph:trash-bold" class="w-4 h-4" />
-                </button>
               </div>
             </div>
           </div>
@@ -225,7 +221,6 @@
             <Icon v-else name="ph:paper-plane-right-bold" class="w-5 h-5" />
           </button>
         </div>
-      </div>
       </div>
     </template>
 

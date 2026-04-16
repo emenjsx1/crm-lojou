@@ -230,8 +230,9 @@ export const useMessageStore = defineStore('messages', {
             console.log(`[STORE] Recuperando ${pData.length} msgs de phone=${pv} para ID=${contactIdStr}`)
             phoneData = [...phoneData, ...pData]
             
-            // Corrige no banco para o ID oficial para evitar buscas futuras lentas
-            await (client.from('messages') as any).update({ contact_id: contactIdStr }).eq('contact_id', pv)
+            // Corrige no banco: remove a versão com phone-id para evitar duplicação futura
+            // (Já que a versão com numeric-id será salva pelo sync ou pelo frontend)
+            await (client.from('messages') as any).delete().eq('contact_id', pv)
           }
         }
       }

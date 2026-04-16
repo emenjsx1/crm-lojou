@@ -90,19 +90,33 @@ export default defineEventHandler(async (event) => {
     mimeType = msgContent.documentMessage.mimetype
   }
 
-  // Tentar encontrar se já existe uma mensagem desse contato vinculada a um ID numérico (Lojou)
-  // Isso ajuda a evitar o mixing mantendo a consistência do contact_id
-  const { data: existingMsg } = await supabase
+  // Tentar encontrar o ID Lojou real deste telefone consultando o histórico
+  let finalContactId = phone
+  const { data: mappingMsg } = await supabase
     .from('messages')
     .select('contact_id')
-    .eq('contact_id', phone)
+    .eq('metadata->key->remoteJid', remoteJid) // Tenta pelo JID exato nos metadados
+    .not('contact_id', 'eq', phone) // Que não seja o próprio telefone
     .limit(1)
     .maybeSingle()
 
-  let finalContactId = phone
-  // Se já temos histórico para este telefone, mas no store usamos o ID numérico,
-  // aqui não conseguimos saber o ID numérico sem consultar a tabela de contatos.
-  // Por enquanto, salvamos no phone, e o frontend fará o "claim" (update) ao abrir.
+  if (mappingMsg && mappingMsg.contact_id) {
+    finalContactId = mappingMsg.contact_id
+    console.log(`[WEBHOOK AUDIT] Mapeado phone ${phone} -> Lojou ID ${finalContactId}`)
+  } else {
+    // Tenta busca genérica por qualquer mensagem que tenha esse telefone, mas ID diferente
+    const { data: fallbackMsg } = await supabase
+      .from('messages')
+      .select('contact_id')
+      .ilike('contact_id', `%${phone.slice(-8)}%`) // Busca parcial segura
+      .not('contact_id', 'ilike', `%${phone}%`)
+      .limit(1)
+      .maybeSingle()
+      
+    if (fallbackMsg && fallbackMsg.contact_id && !fallbackMsg.contact_id.includes('@')) {
+       finalContactId = fallbackMsg.contact_id
+    }
+  }
 
   // Upsert no banco
   const { error } = await supabase
