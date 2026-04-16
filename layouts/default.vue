@@ -16,9 +16,9 @@
     />
 
     <!-- Conteúdo Principal -->
-    <div class="flex flex-col flex-1 w-full transition-all duration-300" :class="isSidebarOpen ? 'lg:pl-64' : 'lg:pl-64 pl-0'">
+    <div class="flex flex-col flex-1 min-w-0 lg:pl-64 transition-all duration-300">
       <Topbar @toggle-sidebar="isSidebarOpen = !isSidebarOpen" />
-      <main class="flex-1 p-4 lg:p-6 overflow-y-auto h-[calc(100vh-4rem)]">
+      <main class="flex-1 p-3 sm:p-4 lg:p-6 overflow-y-auto h-[calc(100vh-4rem)]">
         <slot />
       </main>
     </div>

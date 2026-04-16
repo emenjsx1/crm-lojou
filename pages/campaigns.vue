@@ -55,7 +55,7 @@
       <!-- Main History Table -->
       <div class="lg:col-span-3">
         <div class="bg-white dark:bg-[#09090b] border border-zinc-200 dark:border-zinc-800 rounded-3xl overflow-hidden shadow-sm">
-          <div class="px-8 py-6 border-b border-zinc-200 dark:border-zinc-800 flex items-center justify-between bg-zinc-50/50 dark:bg-zinc-900/20">
+          <div class="px-4 sm:px-8 py-4 sm:py-6 border-b border-zinc-200 dark:border-zinc-800 flex items-center justify-between bg-zinc-50/50 dark:bg-zinc-900/20">
             <h3 class="font-bold text-zinc-900 dark:text-white flex items-center gap-2">
               <Icon name="ph:clock-history-bold" class="text-[#FF009D]" /> Histórico de Disparos
             </h3>
@@ -68,37 +68,37 @@
             <table class="w-full text-left text-sm whitespace-nowrap">
               <thead class="bg-zinc-50/80 dark:bg-zinc-900/50 text-zinc-500 border-b border-zinc-200 dark:border-zinc-800">
                 <tr>
-                  <th class="px-8 py-5 font-bold text-[10px] uppercase tracking-widest text-zinc-400">Transmissão</th>
-                  <th class="px-8 py-5 font-bold text-[10px] uppercase tracking-widest text-zinc-400 text-center">Contatos</th>
-                  <th class="px-8 py-5 font-bold text-[10px] uppercase tracking-widest text-zinc-400 text-center">Status</th>
-                  <th class="px-8 py-5 font-bold text-[10px] uppercase tracking-widest text-zinc-400 text-center">Data do Envio</th>
-                  <th class="px-8 py-5 font-bold text-[10px] uppercase tracking-widest text-zinc-400 text-center">Ação</th>
+                  <th class="px-4 sm:px-8 py-4 sm:py-5 font-bold text-[10px] uppercase tracking-widest text-zinc-400">Transmissão</th>
+                  <th class="px-4 sm:px-8 py-4 sm:py-5 font-bold text-[10px] uppercase tracking-widest text-zinc-400 text-center hidden sm:table-cell">Contatos</th>
+                  <th class="px-4 sm:px-8 py-4 sm:py-5 font-bold text-[10px] uppercase tracking-widest text-zinc-400 text-center">Status</th>
+                  <th class="px-4 sm:px-8 py-4 sm:py-5 font-bold text-[10px] uppercase tracking-widest text-zinc-400 text-center hidden md:table-cell">Data do Envio</th>
+                  <th class="px-4 sm:px-8 py-4 sm:py-5 font-bold text-[10px] uppercase tracking-widest text-zinc-400 text-center">Ação</th>
                 </tr>
               </thead>
               <tbody class="divide-y divide-zinc-100 dark:divide-zinc-800/80 font-inter">
                 <tr v-for="b in broadcasts" :key="b.id" class="group hover:bg-zinc-50/50 dark:hover:bg-zinc-900/40 transition-all">
-                  <td class="px-8 py-6">
-                    <div class="font-bold text-zinc-900 dark:text-zinc-100 group-hover:text-[#FF009D] transition-colors">{{ b.name }}</div>
-                    <div class="text-[11px] text-zinc-500 truncate max-w-[250px] mt-1">{{ b.message }}</div>
+                  <td class="px-4 sm:px-8 py-4 sm:py-6">
+                    <div class="font-bold text-zinc-900 dark:text-zinc-100 group-hover:text-[#FF009D] transition-colors truncate max-w-[160px] sm:max-w-none">{{ b.name }}</div>
+                    <div class="text-[11px] text-zinc-500 truncate max-w-[160px] sm:max-w-[250px] mt-1">{{ b.message }}</div>
                   </td>
-                  <td class="px-8 py-6 text-center">
+                  <td class="px-4 sm:px-8 py-4 sm:py-6 text-center hidden sm:table-cell">
                     <div class="flex flex-col items-center">
                       <span class="font-black text-zinc-900 dark:text-white">{{ b.total_contacts }}</span>
                       <span class="text-[9px] uppercase tracking-tighter text-zinc-400">Destinatários</span>
                     </div>
                   </td>
-                  <td class="px-8 py-6 text-center">
-                    <div class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-wider shadow-sm"
+                  <td class="px-4 sm:px-8 py-4 sm:py-6 text-center">
+                    <div class="inline-flex items-center gap-1.5 px-2 sm:px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-wider shadow-sm"
                           :class="b.status === 'completed' ? 'bg-emerald-500/10 text-emerald-600 border border-emerald-500/20' : 'bg-amber-500/10 text-amber-600 border border-amber-500/20 animate-pulse'">
                       <div class="w-1.5 h-1.5 rounded-full" :class="b.status === 'completed' ? 'bg-emerald-500' : 'bg-amber-500'"></div>
                       {{ b.status === 'completed' ? 'Finalizado' : 'Enviando' }}
                     </div>
                   </td>
-                  <td class="px-8 py-6 text-center">
+                  <td class="px-4 sm:px-8 py-4 sm:py-6 text-center hidden md:table-cell">
                     <div class="text-xs font-semibold text-zinc-600 dark:text-zinc-400">{{ formatDate(b.created_at).split(' ')[0] }}</div>
                     <div class="text-[10px] text-zinc-400 mt-0.5">{{ formatDate(b.created_at).split(' ')[1] }}</div>
                   </td>
-                  <td class="px-8 py-6 text-center">
+                  <td class="px-4 sm:px-8 py-4 sm:py-6 text-center">
                     <button @click="deleteBroadcast(b.id)" class="w-9 h-9 flex items-center justify-center rounded-xl bg-red-500/5 text-red-500 hover:bg-red-500 hover:text-white transition-all">
                       <Icon name="ph:trash-bold" class="w-4 h-4" />
                     </button>

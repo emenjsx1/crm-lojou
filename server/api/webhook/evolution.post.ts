@@ -25,13 +25,24 @@ export default defineEventHandler(async (event) => {
   const payload = body.data || body
   const message = payload.message || payload
   
-  if (message?.key) {
-    console.log(`[WEBHOOK AUDIT] Mensagem detectada - ID: ${message.key.id}, fromMe: ${message.key.fromMe}, RemoteJid: ${message.key.remoteJid}`)
-  }
-
   if (!message || !message.key) {
+    console.log(`[WEBHOOK AUDIT] Payload inválido ou sem chave:`, JSON.stringify(body))
     return { status: 'error', message: 'Invalid payload' }
   }
+
+  const remoteJid = message.key.remoteJid || ''
+  if (remoteJid.includes('@g.us')) {
+    console.log(`[WEBHOOK AUDIT] Mensagem de grupo ignorada: ${remoteJid}`)
+    return { status: 'ignored', reason: 'group_message' }
+  }
+
+  const phone = remoteJid.split('@')[0]
+  if (!phone || phone.includes('status')) {
+    console.log(`[WEBHOOK AUDIT] JID inválido ou status ignorado: ${remoteJid}`)
+    return { status: 'ignored', reason: 'invalid_jid' }
+  }
+
+  console.log(`[WEBHOOK AUDIT] Processando mensagem - ID: ${message.key.id}, De: ${phone}, FromMe: ${message.key.fromMe}`)
 
   // Configuração do Supabase (Usando runtime config do Nuxt)
   const config = useRuntimeConfig()
@@ -40,7 +51,7 @@ export default defineEventHandler(async (event) => {
     config.public.supabaseKey as string
   )
 
-  // Extração de dados (similar ao parseRecord do frontend)
+  // Extração de dados
   let msgContent = message.message || {}
   if (msgContent.ephemeralMessage) msgContent = msgContent.ephemeralMessage.message || {}
   if (msgContent.viewOnceMessage) msgContent = msgContent.viewOnceMessage.message || {}
@@ -79,16 +90,27 @@ export default defineEventHandler(async (event) => {
     mimeType = msgContent.documentMessage.mimetype
   }
 
-  const phone = (message.key.remoteJid || '').split('@')[0]
-  if (!phone || phone.includes('status')) return { status: 'ignored', reason: 'invalid phone' }
+  // Tentar encontrar se já existe uma mensagem desse contato vinculada a um ID numérico (Lojou)
+  // Isso ajuda a evitar o mixing mantendo a consistência do contact_id
+  const { data: existingMsg } = await supabase
+    .from('messages')
+    .select('contact_id')
+    .eq('contact_id', phone)
+    .limit(1)
+    .maybeSingle()
+
+  let finalContactId = phone
+  // Se já temos histórico para este telefone, mas no store usamos o ID numérico,
+  // aqui não conseguimos saber o ID numérico sem consultar a tabela de contatos.
+  // Por enquanto, salvamos no phone, e o frontend fará o "claim" (update) ao abrir.
 
   // Upsert no banco
   const { error } = await supabase
     .from('messages')
     .upsert({
       id: message.key.id,
-      contact_id: phone, 
-      content,
+      contact_id: finalContactId, 
+      content: content || '',
       type,
       is_outgoing: !!message.key.fromMe || eventName === 'SEND_MESSAGE',
       status: 'delivered',
@@ -100,7 +122,7 @@ export default defineEventHandler(async (event) => {
     }, { onConflict: 'id' })
 
   if (error) {
-    console.error('[WEBHOOK ERROR]', error)
+    console.error('[WEBHOOK ERROR] Erro no upsert Supabase:', error)
     return { status: 'error', error }
   }
 

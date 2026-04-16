@@ -4,23 +4,22 @@
 
 
     <!-- Top Header Bar -->
-    <header class="h-16 border-b border-zinc-200 dark:border-zinc-800 bg-white/80 dark:bg-[#09090b]/80 backdrop-blur-md flex items-center justify-between px-6 shrink-0 z-10 sticky top-0">
+    <header class="min-h-[4rem] border-b border-zinc-200 dark:border-zinc-800 bg-white/80 dark:bg-[#09090b]/80 backdrop-blur-md flex flex-wrap items-center justify-between gap-3 px-4 sm:px-6 py-3 shrink-0 z-10 sticky top-0">
       <div class="flex items-center gap-3">
-        <div class="w-8 h-8 rounded-lg bg-[#FF009D]/10 flex items-center justify-center">
+        <div class="w-8 h-8 rounded-lg bg-[#FF009D]/10 flex items-center justify-center shrink-0">
           <Icon name="ph:users-three-fill" class="w-5 h-5 text-[#FF009D]" />
         </div>
-        <h1 class="text-xl font-semibold text-zinc-900 dark:text-white">Usuários Lojou</h1>
+        <h1 class="text-lg sm:text-xl font-semibold text-zinc-900 dark:text-white">Usuários Lojou</h1>
       </div>
-      <div class="flex items-center gap-3">
-
-        <div class="relative">
+      <div class="flex items-center gap-3 w-full sm:w-auto">
+        <div class="relative flex-1 sm:flex-none">
           <Icon name="ph:magnifying-glass" class="w-5 h-5 text-zinc-400 absolute left-3 top-1/2 -translate-y-1/2" />
-          <input 
-            v-model="searchQuery" 
+          <input
+            v-model="searchQuery"
             @keyup.enter="applyFilters"
-            type="text" 
-            placeholder="Buscar usuário (Enter para buscar)..." 
-            class="pl-10 pr-4 py-2 bg-zinc-100 dark:bg-zinc-900/50 border border-zinc-200 dark:border-zinc-800 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#FF009D]/50 w-64 transition-all"
+            type="text"
+            placeholder="Buscar usuário..."
+            class="pl-10 pr-4 py-2 bg-zinc-100 dark:bg-zinc-900/50 border border-zinc-200 dark:border-zinc-800 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#FF009D]/50 w-full sm:w-64 transition-all"
           />
         </div>
       </div>
@@ -31,9 +30,9 @@
 
       <!-- Filters Toolbar Lojou Style -->
       <div class="flex flex-wrap items-end gap-3 p-4 bg-white dark:bg-[#09090b] rounded-xl border border-zinc-200 dark:border-zinc-800 shadow-sm">
-        
+
         <!-- Field Select -->
-        <div class="flex flex-col gap-1.5 w-40">
+        <div class="flex flex-col gap-1.5 w-full sm:w-40">
           <label class="text-xs font-semibold text-zinc-700 dark:text-zinc-300">Buscar por</label>
           <select v-model="searchType" class="w-full bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#FF009D]/50 text-zinc-700 dark:text-zinc-300">
             <option value="email">Email</option>
@@ -55,7 +54,7 @@
         </div>
 
         <!-- Filter Select -->
-        <div class="flex flex-col gap-1.5 w-48">
+        <div class="flex flex-col gap-1.5 w-full sm:w-48">
           <label class="text-xs font-semibold text-zinc-700 dark:text-zinc-300">Filtros</label>
           <select v-model="selectedFilterType" @change="applyFilters" class="w-full bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#FF009D]/50 text-zinc-700 dark:text-zinc-300">
             <option value="todos">Todos</option>
@@ -66,7 +65,7 @@
         </div>
 
         <!-- Filter Button -->
-        <button @click="applyFilters" class="px-6 py-2 bg-black dark:bg-zinc-800 text-white font-medium text-sm rounded-lg hover:opacity-80 transition-all h-[38px] min-w-[120px]">
+        <button @click="applyFilters" class="w-full sm:w-auto px-6 py-2 bg-black dark:bg-zinc-800 text-white font-medium text-sm rounded-lg hover:opacity-80 transition-all h-[38px] min-w-[120px]">
           Filtrar
         </button>
       </div>
@@ -159,8 +158,8 @@
         </div>
         
         <!-- Pagination Simulator Footer -->
-        <div class="border-t border-zinc-200 dark:border-zinc-800 p-4 flex items-center justify-between text-sm text-zinc-500 bg-zinc-50 dark:bg-zinc-900/50 mt-auto">
-           <span>Total: <b>{{ totalRecords }}</b> registros vindos da Lojou</span>
+        <div class="border-t border-zinc-200 dark:border-zinc-800 p-4 flex flex-wrap items-center justify-between gap-3 text-sm text-zinc-500 bg-zinc-50 dark:bg-zinc-900/50 mt-auto">
+           <span>Total: <b>{{ totalRecords }}</b> registros</span>
            <div class="flex gap-2">
              <button @click="changePage(currentPage - 1)" :disabled="currentPage === 1" class="px-3 py-1 border border-zinc-200 dark:border-zinc-800 rounded hover:bg-zinc-200 dark:hover:bg-zinc-800 disabled:opacity-50 transition-all">Anterior</button>
              <button class="px-3 py-1 border border-[#FF009D] bg-[#FF009D]/10 text-[#FF009D] rounded font-medium disabled:opacity-50 transition-all">Pág {{ currentPage }}</button>

@@ -1,25 +1,26 @@
 <template>
   <div class="flex flex-col h-[calc(100vh-6rem)] relative">
     <!-- Header -->
-    <div class="mb-4 flex items-center justify-between">
+    <div class="mb-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
       <h2 class="text-xl font-semibold text-zinc-900 dark:text-white">Mensagens</h2>
-      <div class="flex items-center gap-3">
-        <button 
-          @click="syncAll" 
+      <div class="flex flex-wrap items-center gap-2">
+        <button
+          @click="syncAll"
           :disabled="syncingAll"
           class="flex items-center gap-2 px-3 py-1.5 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500 hover:text-white rounded-lg text-sm font-semibold transition-all disabled:opacity-50"
         >
           <Icon :name="syncingAll ? 'ph:spinner-gap-bold' : 'ph:arrows-clockwise-bold'" class="w-4 h-4" :class="{ 'animate-spin': syncingAll }" />
-          {{ syncingAll ? 'A sincronizar...' : 'Sincronizar Tudo' }}
+          <span class="hidden xs:inline">{{ syncingAll ? 'A sincronizar...' : 'Sincronizar Tudo' }}</span>
+          <span class="xs:hidden">{{ syncingAll ? '...' : 'Sync' }}</span>
         </button>
-        <label class="text-sm font-medium text-zinc-600 dark:text-zinc-400">Assinatura no WhatsApp:</label>
-        <div class="relative">
+        <label class="hidden sm:inline text-sm font-medium text-zinc-600 dark:text-zinc-400 shrink-0">Assinatura:</label>
+        <div class="relative flex-1 min-w-[140px]">
           <Icon name="ph:pen-nib-bold" class="w-4 h-4 text-zinc-400 absolute left-3 top-1/2 -translate-y-1/2" />
           <input
             v-model="agentSignature"
             type="text"
             placeholder="Ex: - *Suporte Lojou*"
-            class="pl-9 pr-3 py-1.5 bg-white dark:bg-[#09090b] border border-zinc-200 dark:border-zinc-800 rounded-lg text-sm text-zinc-900 dark:text-zinc-100 focus:outline-none focus:ring-1 focus:ring-[#FF009D]"
+            class="w-full pl-9 pr-3 py-1.5 bg-white dark:bg-[#09090b] border border-zinc-200 dark:border-zinc-800 rounded-lg text-sm text-zinc-900 dark:text-zinc-100 focus:outline-none focus:ring-1 focus:ring-[#FF009D]"
           />
         </div>
       </div>
@@ -206,24 +207,47 @@ onMounted(() => {
     try {
       const updatedChats = await evo.fetchChats()
       if (updatedChats?.length > 0) {
-        console.log(`[POLLING AUDIT] Verificando novos eventos em ${Math.min(updatedChats.length, 15)} chats...`)
         // Sincroniza os 15 chats mais recentes
         for (const chat of updatedChats.slice(0, 15)) {
           const phone = (chat.id || chat.remoteJid || '').split('@')[0]
-          if (!phone || phone.includes('status')) continue
-          
-          const msgs = await evo.fetchHistory(phone, 5) // Aumentado para 5 últimas
-          if (msgs && (msgs as any[]).length > 0) {
-            let contactIdForChat: string | number = phone
-            const matched = contactsStore.contacts.find(c => {
-               const rawVal = c.phone_number || c.phone || (c as any).whatsapp
-               if (!rawVal || String(rawVal).length < 6) return false
-               const cPhone = String(rawVal).replace(/\D/g, '')
-               return cPhone.endsWith(phone) || phone.endsWith(cPhone)
-            })
-            if (matched) contactIdForChat = matched.id
+          if (!phone || phone.includes('status') || phone.includes('@')) continue
+
+          // Normaliza o telefone do chat para comparação
+          const normalizePhone = (raw: string) => String(raw).replace(/\D/g, '')
+          const chatPhone = normalizePhone(phone)
+          if (chatPhone.length < 7) continue
+
+          // Matching estrito: os dois números normalizados precisam ser iguais
+          // ou um deve ser o outro com DDI na frente (ex: 258 + 841234567)
+          // Matching estrito: os dois números normalizados precisam ser iguais
+          // ou um deve ser o outro com DDI na frente (ex: 258 + 841234567)
+          const matched = contactsStore.contacts.find(c => {
+            const rawVal = c.phone_number || c.phone || (c as any).whatsapp || (c as any).phone_whatsapp
+            if (!rawVal) return false
+            const cPhone = normalizePhone(String(rawVal))
+            if (cPhone.length < 7) return false
             
-            await messagesStore.syncFromEvolution(contactIdForChat, msgs)
+            // Prioriza matches exatos ou com DDI 258/55
+            const variants = [cPhone, '258' + cPhone, cPhone.replace(/^258/, ''), '55' + cPhone, cPhone.replace(/^55/, '')]
+            return variants.includes(chatPhone) || 
+                   chatPhone === '258' + cPhone || 
+                   '258' + chatPhone === cPhone
+          })
+
+          // Se encontramos um contato oficial da Lojou, usamos o ID dele.
+          // Se não, ignoramos para não criar contatos "fantasmas" no polling global.
+          // O usuário pode criar um contato manual via "Novo Chat".
+          if (!matched) continue
+
+          const msgs = await evo.fetchHistory(phone, 12)
+          if (msgs && (msgs as any[]).length > 0) {
+            await messagesStore.syncFromEvolution(matched.id, msgs)
+            
+            // Se as mensagens novas chegarem, atualizamos a lista de "recentes" se necessário
+            const isRecent = recentChats.value.some(rc => String(rc.id) === String(matched.id))
+            if (!isRecent) {
+               markContactAsMessaged(matched)
+            }
           }
         }
       }
@@ -306,7 +330,8 @@ const selectContact = async (contact: any) => {
   if (!phone) return
 
   // Primeiro carrega o que já temos no Supabase (offline/cache)
-  await messagesStore.fetchFromSupabase(contact.id)
+  // Passa o telefone para recuperar mensagens que foram salvas com o phone como contact_id (bug antigo)
+  await messagesStore.fetchFromSupabase(contact.id, phone)
 
   // Depois sincroniza o histórico mais recente da Evolution
   const history = await evo.fetchHistory(phone)
@@ -492,6 +517,20 @@ const startConversationWith = (user: any) => {
 }
 
 const onNewChat = (phone: string) => {
+  const cleanPhone = phone.replace(/\D/g, '')
+  if (!cleanPhone) return
+
+  // Tenta encontrar um contato existente com esse telefone antes de criar um novo
+  const existing = contactsStore.contacts.find(c => {
+    const cPhone = String(c.phone_number || c.phone || (c as any).whatsapp || '').replace(/\D/g, '')
+    return cPhone === cleanPhone || cPhone.endsWith(cleanPhone) || cleanPhone.endsWith(cPhone)
+  })
+
+  if (existing) {
+    selectContact(existing)
+    return
+  }
+
   const newContact = {
     id: 'local_' + Date.now(),
     phone_number: phone,

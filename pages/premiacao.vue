@@ -1,11 +1,11 @@
 <template>
   <div class="space-y-6 max-w-7xl mx-auto pb-10">
-    <div class="flex items-center justify-between mb-8">
+    <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between mb-8 gap-4">
       <div>
         <h2 class="text-2xl font-bold text-zinc-900 dark:text-white">Premiação (Metas)</h2>
         <p class="text-sm text-zinc-500 mt-1">Acompanhe os usuários que bateram grandes marcos de vendas (10k a 1M).</p>
       </div>
-      <button @click="loadRewards" class="flex items-center gap-2 px-4 py-2 bg-white dark:bg-[#09090b] border border-zinc-200 dark:border-zinc-800 rounded-lg text-sm text-zinc-700 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-all font-medium">
+      <button @click="loadRewards" class="flex items-center gap-2 px-4 py-2 bg-white dark:bg-[#09090b] border border-zinc-200 dark:border-zinc-800 rounded-lg text-sm text-zinc-700 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-all font-medium self-start sm:self-auto">
         <Icon :name="loading ? 'ph:spinner-gap-bold' : 'ph:arrows-clockwise-bold'" :class="{'animate-spin text-[#FF009D]': loading}" />
         Atualizar Ranking
       </button>

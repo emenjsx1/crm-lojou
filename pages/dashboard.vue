@@ -1,18 +1,18 @@
 <template>
   <div class="space-y-6 max-w-7xl mx-auto pb-10">
-    <div class="flex items-center justify-between mb-8">
+    <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between mb-8 gap-4">
       <div>
         <h2 class="text-2xl font-bold text-zinc-900 dark:text-white">Visão Geral</h2>
         <p class="text-sm text-zinc-500 mt-1">Métricas em tempo real da sua base de contatos Lojou.</p>
       </div>
-      <button @click="fetchAll" class="flex items-center gap-2 px-4 py-2 bg-white dark:bg-[#09090b] border border-zinc-200 dark:border-zinc-800 rounded-lg text-sm text-zinc-700 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-all font-medium">
+      <button @click="fetchAll" class="flex items-center gap-2 px-4 py-2 bg-white dark:bg-[#09090b] border border-zinc-200 dark:border-zinc-800 rounded-lg text-sm text-zinc-700 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-all font-medium self-start sm:self-auto">
         <Icon :name="loading ? 'ph:spinner-gap-bold' : 'ph:arrows-clockwise-bold'" :class="{'animate-spin text-[#FF009D]': loading}" />
         Sincronizar
       </button>
     </div>
 
     <!-- Top Metric Cards -->
-    <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
+    <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">
       <!-- Total Contacts -->
       <div class="bg-white dark:bg-[#09090b] border border-zinc-200 dark:border-zinc-800 rounded-2xl p-5 shadow-sm relative overflow-hidden group">
         <div class="absolute -right-4 -top-4 w-16 h-16 bg-[#FF009D]/5 rounded-full group-hover:scale-150 transition-transform duration-500"></div>
@@ -34,7 +34,7 @@
 <!-- Removed unused metrics to focus on Messages and Contacts -->
 
       <!-- Messages -->
-      <div class="bg-white dark:bg-[#09090b] border border-zinc-200 dark:border-zinc-800 rounded-2xl p-5 shadow-sm relative overflow-hidden group md:col-span-3">
+      <div class="bg-white dark:bg-[#09090b] border border-zinc-200 dark:border-zinc-800 rounded-2xl p-5 shadow-sm relative overflow-hidden group sm:col-span-2 md:col-span-3">
         <div class="absolute -right-4 -top-4 w-16 h-16 bg-purple-500/5 rounded-full group-hover:scale-150 transition-transform duration-500"></div>
         <div class="flex items-center justify-between mb-4 relative">
           <div class="flex items-center gap-3">
