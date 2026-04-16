@@ -410,32 +410,41 @@ const loadRecentChats = async () => {
 
   if (merged.length > 0) {
     const enriched = await Promise.all(merged.map(async (c: any) => {
-      // Garantir JID normalizado para busca de mensagens
-      let jid = c.remote_jid || ''
-      if (jid.includes('@s.whatsapp.net')) {
-        const rawNum = jid.split('@')[0]
-        if (rawNum.length === 9 && rawNum.startsWith('8')) {
-          jid = '258' + rawNum + '@s.whatsapp.net'
-        }
-      }
+      // Normalização agressiva para busca e deduplicação
+      const getPhone = (j: string) => j.split('@')[0].replace(/\D/g, '').replace(/^258/, '')
+      const phoneLocal = getPhone(c.remote_jid || '')
+      
+      // Padronizar JID para busca de mensagens
+      const standardJid = '258' + phoneLocal + '@s.whatsapp.net'
 
       const { data: lastMsg } = await supabase
         .from('messages')
         .select('content, timestamp, is_outgoing')
-        .eq('remote_jid', jid)
+        .eq('remote_jid', standardJid)
         .order('timestamp', { ascending: false })
         .limit(1)
         .maybeSingle()
       
       return {
         ...c,
-        remote_jid: jid,
+        phoneLocal,
+        remote_jid: standardJid,
         lastMessage: lastMsg?.content || '...',
         lastMessageTime: lastMsg?.timestamp || c.created_at || new Date().toISOString()
       }
     }))
+
+    // ── DEDUPLICAÇÃO FINAL NA SIDEBAR ────────────────────────────────
+    // Agrupar por phoneLocal e ficar com o que tiver mensagem mais recente
+    const dedupedMap = new Map()
+    for (const chat of enriched) {
+      if (!dedupedMap.has(chat.phoneLocal) || 
+          new Date(chat.lastMessageTime) > new Date(dedupedMap.get(chat.phoneLocal).lastMessageTime)) {
+        dedupedMap.set(chat.phoneLocal, chat)
+      }
+    }
     
-    recentChats.value = enriched.sort(
+    recentChats.value = Array.from(dedupedMap.values()).sort(
       (a: any, b: any) => new Date(b.lastMessageTime).getTime() - new Date(a.lastMessageTime).getTime()
     )
   }
