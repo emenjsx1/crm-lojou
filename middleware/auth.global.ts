@@ -45,9 +45,13 @@ export default defineNuxtRouteMiddleware(async (to, from) => {
   }
 
   // 3. Regra de Role 'user': Redirecionar para o painel web (área do cliente)
-  if (authStore.userRole === 'user') {
+  // Fazemos check case-insensitive para evitar bugs se a API retornar 'User'
+  const currentRole = String(authStore.userRole).toLowerCase()
+  if (currentRole === 'user') {
+    console.warn('[AUTH REDIRECT] Redirecionando cliente final para o painel web')
     return navigateTo('https://web.lojou.app', { external: true })
   }
 
+  console.log('[AUTH DEBUG] Acesso permitido para role:', authStore.userRole)
   // Se passou por tudo, permite o acesso
 })

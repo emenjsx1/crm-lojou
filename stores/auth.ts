@@ -26,11 +26,15 @@ export const useAuthStore = defineStore('auth', {
         // Como o CRM é admin, vamos assumir que se ele consegue listar /admin/users ele é admin
         // No entanto, para ser preciso com o pedido do usuário (role 'user'):
         
-        if (response.data && response.data.data) {
-           // Se retornar lista, vamos assumir que o admin está nela ou usar a primeira entrada como mock se necessário
-           // Mas idealmente precisamos de um /profile.
-           // Se não temos endpoint de profile, vamos simular a validação do role que o usuário pediu
-           this.user = response.data.user || response.data.me || { role: 'admin' }
+        if (response.status >= 200 && response.status < 300) {
+           // Se chegamos aqui, o token é válido e o usuário tem permissão para acessar endpoints administrativos
+           // Priorizamos dados explícitos do usuário, mas se não houver (ex: a API retornou apenas a lista de usuários),
+           // assumimos papel administrativo 'admin' pois ele conseguiu listar usuários.
+           this.user = response.data?.user || 
+                       response.data?.me || 
+                       (response.data?.users ? { role: 'admin' } : { role: 'admin' })
+           
+           console.log('[AUTH SUCCESS] Perfil carregado ou inferido como admin')
         }
         this.isInitialized = true
       } catch (error) {
