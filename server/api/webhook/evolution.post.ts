@@ -90,32 +90,22 @@ export default defineEventHandler(async (event) => {
     mimeType = msgContent.documentMessage.mimetype
   }
 
-  // Tentar encontrar o ID Lojou real deste telefone consultando o histórico
+  // Tentar encontrar o ID Lojou oficial associado a este JID (WhatsApp)
+  // Olhamos apenas para mensagens anteriores que já foram marcadas com um ID numérico da Lojou
   let finalContactId = phone
   const { data: mappingMsg } = await supabase
     .from('messages')
     .select('contact_id')
-    .eq('metadata->key->remoteJid', remoteJid) // Tenta pelo JID exato nos metadados
-    .not('contact_id', 'eq', phone) // Que não seja o próprio telefone
+    .eq('metadata->key->remoteJid', remoteJid)
+    .not('contact_id', 'ilike', '%:%') // Filtro para garantir que pegamos um ID que não seja JID
+    .not('contact_id', 'eq', phone)    // Filtro para garantir que não seja o próprio telefone
+    .order('timestamp', { ascending: false })
     .limit(1)
     .maybeSingle()
 
-  if (mappingMsg && mappingMsg.contact_id) {
+  if (mappingMsg && mappingMsg.contact_id && !isNaN(Number(mappingMsg.contact_id.charAt(0)))) {
     finalContactId = mappingMsg.contact_id
-    console.log(`[WEBHOOK AUDIT] Mapeado phone ${phone} -> Lojou ID ${finalContactId}`)
-  } else {
-    // Tenta busca genérica por qualquer mensagem que tenha esse telefone, mas ID diferente
-    const { data: fallbackMsg } = await supabase
-      .from('messages')
-      .select('contact_id')
-      .ilike('contact_id', `%${phone.slice(-8)}%`) // Busca parcial segura
-      .not('contact_id', 'ilike', `%${phone}%`)
-      .limit(1)
-      .maybeSingle()
-      
-    if (fallbackMsg && fallbackMsg.contact_id && !fallbackMsg.contact_id.includes('@')) {
-       finalContactId = fallbackMsg.contact_id
-    }
+    console.log(`[WEBHOOK] Mapeado com precisão: ${phone} -> ${finalContactId}`)
   }
 
   // Upsert no banco

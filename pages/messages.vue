@@ -148,10 +148,16 @@ const syncAll = async () => {
 
       const phone = jid.split('@')[0]
       
-      // Tentar encontrar o contato no nosso store ou criar um local temporário
+      // Tentar encontrar o contato no nosso store de forma rigorosa
       let contact = contactsStore.contacts.find(c => {
-        const cPhone = String(c.phone_number || c.phone || c.whatsapp || '').replace(/\D/g, '')
-        return cPhone.endsWith(phone) || phone.endsWith(cPhone)
+        const rawVal = c.phone_number || c.phone || c.whatsapp || ''
+        const cPhone = String(rawVal).replace(/\D/g, '')
+        if (cPhone.length < 7 || phone.length < 7) return false
+        
+        return cPhone === phone || 
+               cPhone === '258' + phone || 
+               '258' + cPhone === phone ||
+               cPhone.endsWith(phone.substring(1)) // Safe suffix match for varying DDIs
       })
 
       if (!contact) {
@@ -226,14 +232,13 @@ onMounted(() => {
           const matched = contactsStore.contacts.find(c => {
             const rawVal = c.phone_number || c.phone || (c as any).whatsapp || (c as any).phone_whatsapp
             if (!rawVal) return false
-            const cPhone = normalizePhone(String(rawVal))
+            const cPhone = normalizePhone(String(rawVal)).replace(/\D/g, '')
             if (cPhone.length < 7) return false
             
-            // Prioriza matches exatos ou com DDI 258/55
-            const variants = [cPhone, '258' + cPhone, cPhone.replace(/^258/, ''), '55' + cPhone, cPhone.replace(/^55/, '')]
-            return variants.includes(chatPhone) || 
-                   chatPhone === '258' + cPhone || 
-                   '258' + chatPhone === cPhone
+            // Match estrito: evita casamentos falsos com números vazios ou curtos
+            return cPhone === chatPhone || 
+                   cPhone === '258' + chatPhone || 
+                   '258' + cPhone === chatPhone
           })
 
           // Se encontramos um contato oficial da Lojou, usamos o ID dele.
@@ -337,15 +342,23 @@ if (typeof window !== 'undefined') {
 }
 
 const activeConversations = computed(() => {
-  return recentChats.value.map(contact => {
-    const contactMessages = messagesStore.getMessagesByContact(contact.id)
-    const lastMsg = contactMessages[contactMessages.length - 1]
-    return {
-      ...contact,
-      lastMessage: lastMsg?.content || '',
-      lastMessageTime: lastMsg?.timestamp || contact.created_at || new Date().toISOString()
-    }
-  })
+  if (!recentChats.value) return []
+  
+  return recentChats.value
+    .map(contact => {
+      // Usamos a nova estrutura O(1) do store para performance fluida
+      const contactMessages = messagesStore.getMessagesByContact(contact.id)
+      if (contactMessages.length === 0) return null
+      
+      const lastMsg = contactMessages[contactMessages.length - 1]
+      return {
+        ...contact,
+        lastMessage: lastMsg?.content || '...',
+        lastMessageTime: lastMsg?.timestamp || contact.created_at || new Date().toISOString()
+      }
+    })
+    .filter(c => c !== null) // Apenas contactos com conversas ativas no sistema
+    .sort((a, b) => new Date(b.lastMessageTime).getTime() - new Date(a.lastMessageTime).getTime())
 })
 
 // Mensagens do contacto activo — ordenadas
@@ -393,11 +406,9 @@ onUnmounted(() => {
 const onDeleteMessage = async (msgId: string) => {
   try {
     await evo.deleteMessage(msgId)
-    // Remove do banco e do store
-    const client = useSupabaseClient()
-    await (client.from('messages') as any).delete().eq('id', msgId)
-    const idx = messagesStore.messages.findIndex(m => m.id === msgId)
-    if (idx !== -1) messagesStore.messages.splice(idx, 1)
+    // Remove do store
+    messagesStore.clearContact(activeContact.value?.id) // Limpeza segura
+    await messagesStore.fetchFromSupabase(activeContact.value?.id) // Recarrega o que sobrou
   } catch (err) {
     console.error('[DELETE MESSAGE] Erro:', err)
   }
