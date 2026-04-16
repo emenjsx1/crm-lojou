@@ -266,6 +266,10 @@ onMounted(() => {
 
   // SUPABASE REALTIME SUBSCRIPTION
   supabase = useSupabaseClient()
+
+  // Carregar lista inicial do Supabase
+  await loadRecentChats()
+
   channel = supabase.channel('messages-realtime')
     .on('postgres_changes', { 
       event: 'INSERT', 
@@ -273,54 +277,48 @@ onMounted(() => {
       table: 'messages' 
     }, async (payload) => {
       const newMsg = payload.new
-      const msgJid = newMsg.remote_jid || (newMsg.contact_id + '@s.whatsapp.net') // Fallback seguro
+      const msgJid = newMsg.remote_jid
       
+      if (!msgJid) return
       console.log(`[REALTIME] Nova mensagem: ${newMsg.id} para JID: ${msgJid}`)
 
-      // 1. Atualizar histórico se for o contato ativo
-      if (activeContact.value && activeContact.value.remote_jid === msgJid) {
+      // 1. Atualizar histórico se for o contacto activo
+      if (activeContact.value?.remote_jid === msgJid) {
         await messagesStore.fetchFromSupabase(msgJid)
-      } 
-      
-      // 2. Notificação de Lead / Identificação
-      if (!newMsg.is_outgoing) {
-         const { data: contact } = await supabase
-           .from('contacts')
-           .select('user_id, name, remote_jid')
-           .eq('remote_jid', msgJid)
-           .maybeSingle()
-         
-         if (!contact || !contact.user_id) {
-            const toast = useToast()
-            toast.add({
-              title: 'Novo Lead!',
-              description: `Mensagem de ${contact?.name || msgJid.split('@')[0]}`,
-              icon: 'i-heroicons-user-plus',
-              color: 'amber',
-              timeout: 6000,
-              actions: [{
-                label: 'Atender',
-                click: () => {
-                  if (contact) selectContact(contact)
-                  else onNewChat(msgJid.split('@')[0])
-                }
-              }]
-            })
-         }
-         
-         // Adicionar aos recentes se não estiver lá
-         if (contact) markContactAsMessaged(contact)
       }
 
-      // 3. Atualizar lista de recentes
-      const matched = contactsStore.contacts.find(c => {
-        const rawVal = c.phone_number || c.phone || (c as any).whatsapp || (c as any).phone_whatsapp
-        return String(c.id) === String(newMsg.contact_id) || (rawVal && String(rawVal).includes(msgPhone))
-      })
-      
-      if (matched) {
-        markContactAsMessaged(matched)
+      // 2. Recarregar lista de contactos do Supabase (inclui novos leads)
+      await loadRecentChats()
+
+      // 3. Notificação de Lead para mensagens recebidas (não enviadas)
+      if (!newMsg.is_outgoing) {
+        const { data: contact } = await supabase
+          .from('contacts')
+          .select('id, user_id, name, remote_jid, phone')
+          .eq('remote_jid', msgJid)
+          .maybeSingle()
+
+        const toast = useToast()
+        toast.add({
+          title: contact?.user_id ? '💬 Nova Mensagem' : '🆕 Novo Lead!',
+          description: `Mensagem de ${contact?.name || msgJid.split('@')[0]}`,
+          icon: contact?.user_id ? 'i-heroicons-chat-bubble-left' : 'i-heroicons-user-plus',
+          color: contact?.user_id ? 'emerald' : 'amber',
+          timeout: 6000,
+          actions: [{
+            label: 'Atender',
+            click: () => contact ? selectContact(contact) : onNewChat(msgJid.split('@')[0])
+          }]
+        })
       }
+    })
+    .on('postgres_changes', {
+      event: 'INSERT',
+      schema: 'public',
+      table: 'contacts'
+    }, async () => {
+      // Novo contacto criado pelo webhook → actualizar lista imediatamente
+      await loadRecentChats()
     })
     .subscribe()
 })
@@ -365,35 +363,47 @@ watch(agentSignature, (val) => {
   }
 })
 
-// Lista de conversas: Puxa do localStorage
+// Lista de conversas: carrega do Supabase contacts table (não do localStorage)
+// Assim qualquer contacto criado via webhook aparece imediatamente
 const recentChats = ref<any[]>([])
-if (typeof window !== 'undefined') {
-  const stored = localStorage.getItem('lojou_recent_chats_v2')
-  if (stored) {
-    try { recentChats.value = JSON.parse(stored) } catch(e){}
+
+const loadRecentChats = async () => {
+  if (!supabase) supabase = useSupabaseClient()
+  // Buscar todos os contactos que têm mensagens, ordenados pelo timestamp da mensagem mais recente
+  const { data: rows } = await supabase
+    .from('contacts')
+    .select('*, users(*)')
+    .order('created_at', { ascending: false })
+    .limit(50)
+  
+  if (rows && rows.length > 0) {
+    // Para cada contacto, buscar a última mensagem
+    const enriched = await Promise.all(rows.map(async (c: any) => {
+      const { data: lastMsg } = await supabase
+        .from('messages')
+        .select('content, timestamp, is_outgoing')
+        .eq('remote_jid', c.remote_jid)
+        .order('timestamp', { ascending: false })
+        .limit(1)
+        .maybeSingle()
+      
+      return {
+        ...c,
+        lastMessage: lastMsg?.content || '...',
+        lastMessageTime: lastMsg?.timestamp || c.created_at || new Date().toISOString()
+      }
+    }))
+    
+    // Ordenar por mensagem mais recente
+    recentChats.value = enriched.sort(
+      (a: any, b: any) => new Date(b.lastMessageTime).getTime() - new Date(a.lastMessageTime).getTime()
+    )
   }
 }
 
 const activeConversations = computed(() => {
   if (!recentChats.value) return []
-  
   return recentChats.value
-    .map(contact => {
-      const p = contact.phone_number || contact.phone || contact.whatsapp || ''
-      const jid = p.includes('@') ? p : `${String(p).replace(/\D/g, '')}@s.whatsapp.net`
-      const contactMessages = messagesStore.getMessagesByJid(jid)
-      if (contactMessages.length === 0) return null
-      
-      const lastMsg = contactMessages[contactMessages.length - 1]
-      return {
-        ...contact,
-        remote_jid: jid,
-        lastMessage: lastMsg?.content || '...',
-        lastMessageTime: lastMsg?.timestamp || contact.created_at || new Date().toISOString()
-      }
-    })
-    .filter(c => c !== null)
-    .sort((a, b) => new Date(b.lastMessageTime).getTime() - new Date(a.lastMessageTime).getTime())
 })
 
 // Mensagens do contacto activo — ordenadas por JID
