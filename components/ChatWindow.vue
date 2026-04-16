@@ -48,16 +48,33 @@
       <div v-if="!contact.users" class="px-4 py-2.5 bg-gradient-to-r from-amber-500/10 via-amber-500/5 to-transparent border-b border-amber-500/20 flex items-center justify-between shrink-0">
         <div class="flex items-center gap-3">
           <div class="w-8 h-8 rounded-lg bg-amber-500/10 flex items-center justify-center text-amber-600">
-            <Icon name="ph:user-plus-bold" class="w-5 h-5" />
+            <Icon v-if="!lojouChecking" name="ph:user-plus-bold" class="w-5 h-5" />
+            <Icon v-else name="ph:spinner-gap-bold" class="w-5 h-5 animate-spin" />
           </div>
           <div>
-            <p class="text-sm font-bold text-amber-800 dark:text-amber-400 uppercase tracking-tight">Número não cadastrado</p>
-            <p class="text-[11px] text-amber-700/70 dark:text-amber-400/70">Este contato não está vinculado ao sistema de jogo.</p>
+            <p class="text-sm font-bold text-amber-800 dark:text-amber-400 uppercase tracking-tight">Número não cadastrado na Lojou</p>
+            <p class="text-[11px] text-amber-700/70 dark:text-amber-400/70">
+              {{ lojouChecking ? 'A verificar na Lojou...' : `${contactPhone || 'Número'} não está registado no sistema de jogo.` }}
+            </p>
           </div>
         </div>
         <div class="flex gap-2">
-          <UButton size="2xs" color="amber" variant="soft" label="Criar Usuário" icon="i-heroicons-plus" />
-          <UButton size="2xs" color="gray" variant="ghost" label="Ignorar" />
+          <UButton 
+            size="2xs" 
+            color="amber" 
+            variant="soft" 
+            :loading="lojouChecking"
+            label="Re-verificar" 
+            icon="i-heroicons-arrow-path"
+            @click="checkLojou"
+          />
+          <UButton 
+            size="2xs" 
+            color="gray" 
+            variant="ghost" 
+            label="Ignorar" 
+            @click="leadIgnored = true"
+          />
         </div>
       </div>
 
@@ -301,12 +318,77 @@ const emit = defineEmits<{
   (e: 'send-media', opts: { type: 'image' | 'audio' | 'video' | 'document', base64: string, filename: string, mimeType: string, caption?: string }): void
   (e: 'delete-message', msgId: string): void
   (e: 'back'): void
+  (e: 'user-found', userData: { id: string, name: string, balance: number }): void
 }>()
 
 const newMessage = ref('')
 const msgsContainer = ref<HTMLElement | null>(null)
 const fileInput = ref<HTMLInputElement | null>(null)
 const lightboxSrc = ref<string | null>(null)
+const lojouChecking = ref(false)
+const leadIgnored = ref(false)
+const toast = useToast()
+
+// Verificar utilizador na Lojou pelo número do contacto activo
+const checkLojou = async () => {
+  const phone = contactPhone.value
+  if (!phone || lojouChecking.value) return
+
+  // Extrair número limpo do JID ou do campo phone
+  const cleanPhone = String(phone).includes('@')
+    ? phone.split('@')[0]
+    : String(phone).replace(/\D/g, '')
+
+  if (!cleanPhone) return
+
+  lojouChecking.value = true
+  try {
+    const res = await $fetch<any>('/api/lojou/check-user', {
+      method: 'POST',
+      body: { phone: cleanPhone }
+    })
+
+    if (res.found && res.user) {
+      toast.add({
+        title: '✅ Utilizador Identificado!',
+        description: `${res.user.name} encontrado na Lojou.`,
+        color: 'emerald',
+        icon: 'i-heroicons-check-circle',
+        timeout: 5000
+      })
+      emit('user-found', res.user)
+    } else {
+      toast.add({
+        title: '⚠️ Não encontrado na Lojou',
+        description: `O número ${cleanPhone} não está registado no sistema de jogo.`,
+        color: 'amber',
+        icon: 'i-heroicons-exclamation-triangle',
+        timeout: 5000
+      })
+    }
+  } catch (e) {
+    toast.add({
+      title: 'Erro de verificação',
+      description: 'Não foi possível consultar a Lojou. Verifique o token de admin.',
+      color: 'red',
+      icon: 'i-heroicons-x-circle',
+      timeout: 5000
+    })
+  } finally {
+    lojouChecking.value = false
+  }
+}
+
+// Auto-verificar na Lojou quando se abre um contacto Lead (sem user_id)
+watch(() => props.contact, async (newContact, oldContact) => {
+  if (!newContact) return
+  // Reset lead ignored flag when switching contacts
+  if (newContact?.id !== oldContact?.id) leadIgnored.value = false
+  // Auto-check se for lead e ainda não ignorado
+  if (!newContact.users && !newContact.user_id && !leadIgnored.value) {
+    await checkLojou()
+  }
+}, { immediate: false })
 
 // Ficheiro pendente (antes de enviar)
 const pendingFile = ref<{ name: string, base64: string, mimeType: string, type: 'image' | 'audio' | 'video' | 'document' } | null>(null)
@@ -322,6 +404,9 @@ let recordingStream: MediaStream | null = null
 
 const contactPhone = computed(() => {
   if (!props.contact) return null
+  // Preferir remote_jid (mais fiável), senão phone convencional
+  const jid = props.contact.remote_jid
+  if (jid) return jid.split('@')[0]
   return props.contact.phone_number || props.contact.phone || props.contact.whatsapp || null
 })
 

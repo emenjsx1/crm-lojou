@@ -47,6 +47,7 @@
         @send-media="onSendMedia"
         @delete-message="onDeleteMessage"
         @back="activeContact = null"
+        @user-found="onUserFound"
       />
     </div>
 
@@ -450,8 +451,27 @@ const selectContact = async (contact: any) => {
 
 onUnmounted(() => {
   clearInterval(pollTimer)
-  // Certifique-se de limpar o globalPollTimer se ele for definido no escopo acessível
 })
+
+// Quando o ChatWindow identifica o utilizador na Lojou, actualiza o contacto activo
+const onUserFound = async (userData: { id: string, name: string, balance: number }) => {
+  if (!activeContact.value) return
+
+  const jid = activeContact.value.remote_jid
+  if (!jid) return
+
+  // Recarregar dados completos do contacto (agora já tem user_id)
+  const { data: updatedContact } = await supabase
+    .from('contacts')
+    .select('*, users(*)')
+    .eq('remote_jid', jid)
+    .maybeSingle()
+
+  if (updatedContact) {
+    // Reactualizar contacto activo — o banner de "Lead" vai desaparecer automaticamente
+    activeContact.value = { ...activeContact.value, ...updatedContact }
+  }
+}
 
 const onDeleteMessage = async (msgId: string) => {
   try {
