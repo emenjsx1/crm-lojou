@@ -308,9 +308,11 @@ const formattedPhone = computed(() => {
   return contactPhone.value
 })
 
-const hasEvolution = computed(() => {
-  if (typeof window === 'undefined') return false
-  return !!(localStorage.getItem('evolution_url') && localStorage.getItem('evolution_api_key'))
+const hasEvolution = ref(false)
+onMounted(async () => {
+  const { getCredentials } = useEvolution()
+  const creds = await getCredentials()
+  hasEvolution.value = !!creds
 })
 
 // Scroll para o fim quando chegam mensagens

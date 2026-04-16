@@ -23,14 +23,10 @@ export const useEvolution = () => {
     if (d.startsWith('00')) d = d.slice(2)
     if (d.startsWith('0')) d = d.slice(1)
     
-    // Se tiver 9 dígitos e não começar com 258, assume-se Moçambique (legado do código anterior)
-    // Mas se tiver 10 ou 11 e começar com 1, 2, 3, etc. (Brasil), a gente tenta manter
-    if (d.length === 9 && !d.startsWith('258')) {
-      // Se o usuário estiver em outro país, isso pode precisar de ajuste nas configurações
+    // Se tiver 9 dígitos (Moçambique) e não começar com 258, adiciona
+    if (d.length === 9 && (d.startsWith('82') || d.startsWith('83') || d.startsWith('84') || d.startsWith('85') || d.startsWith('86') || d.startsWith('87'))) {
       d = '258' + d
     }
-    
-    // Se já tiver DDI (ex: 55 para Brasil), não mexe
     return d
   }
 
@@ -176,7 +172,7 @@ export const useEvolution = () => {
     if (!c) return []
     const phone = formatPhone(rawPhone)
     const jid = phone + '@s.whatsapp.net'
-
+    console.log(`[EVO DEBUG] Buscando histórico para JID: ${jid}`)
     // Tentar múltiplos formatos de query (compatibilidade V1/V2 correta)
     const attempts = [
       () => c.http.post(`/chat/findMessages/${c.instance}`, {

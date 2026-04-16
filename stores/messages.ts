@@ -97,7 +97,7 @@ export const useMessageStore = defineStore('messages', {
 
       try {
         console.log(`[STORE AUDIT] Persistindo mensagem ${params.evoId} no Supabase...`)
-        const { data, error } = await (client.from('messages') as any).upsert(payload, { onConflict: 'id' }).select()
+        const { data, error } = await (client.from('messages') as any).upsert(payload, { onConflict: 'id, contact_id' }).select()
         if (error) {
            console.error('[STORE AUDIT] Falha ao persistir no Supabase:', error)
         } else {
@@ -119,59 +119,41 @@ export const useMessageStore = defineStore('messages', {
       const contactIdStr = String(contactId)
 
       // Identificadores únicos que já temos no store para ESTE contato
-      const existingEvoIds = new Set(
+      // Usamos uma chave composta (evo_id + contact_id) para evitar que mensagens
+      // de broadcast (com mesmo ID) se misturem entre chats diferentes.
+      const existingKeySet = new Set(
         this.messages
           .filter(m => String(m.contact_id) === contactIdStr)
-          .map(m => m.evo_id)
-          .filter(Boolean)
+          .map(m => `${m.evo_id}_${m.contact_id}`)
       )
 
       const toUpsert: any[] = []
 
       for (const em of evoMessages) {
         if (!em.evoId) continue
+        const myKey = `${em.evoId}_${contactIdStr}`
 
         // 1. Já existe no store para este contato? Skip.
-        if (existingEvoIds.has(em.evoId)) continue
+        if (existingKeySet.has(myKey)) continue
 
-        // 2. Existe no store para OUTRO contato? 
-        // Isso acontece se o webhook salvou no phone mas estamos no ID numérico,
-        // ou se o polling do Chat A pegou mensagens do Chat B.
-        const existingInOther = this.messages.find(m => m.evo_id === em.evoId)
-        
-        if (existingInOther) {
-          // Se o contact_id for diferente, vamos avaliar se devemos "roubar" a mensagem
-          // Se o existingInOther.contact_id for um telefone e o novo contactId for numérico, 
-          // ou se forem equivalentes por telefone (mesma pessoa, IDs diferentes no CRM)
-          const isPhoneId = (id: string) => /^\d+$/.test(id) && id.length > 7
-          
-          if (String(existingInOther.contact_id) !== contactIdStr) {
-             // Só movemos se tivermos certeza que é do mesmo "remetente"
-             // Por enquanto, confiamos no sync que o caller (messages.vue) já fez o match de telefone.
-             console.log(`[SYNC] Movendo mensagem ${em.evoId} de ${existingInOther.contact_id} para ${contactIdStr}`)
-             existingInOther.contact_id = contactId
-          }
-          continue
-        }
-
-        // 3. Verifica se é uma mensagem optimista local (enviada pelo CRM)
+        // 2. Verifica se é uma mensagem optimista local (enviada pelo CRM)
         const optimistic = this.messages.find(m =>
           String(m.contact_id) === contactIdStr &&
           !m.evo_id &&
           m.is_outgoing === em.fromMe &&
           m.content === em.content &&
-          Math.abs(new Date(m.timestamp).getTime() - em.timestamp) < 45000 // Aumentado para 45s
+          Math.abs(new Date(m.timestamp).getTime() - em.timestamp) < 60000 // 60s
         )
 
         if (optimistic) {
           optimistic.evo_id = em.evoId
-          optimistic.id = em.evoId // Substitui local_ID pelo real
+          optimistic.id = em.evoId 
           optimistic.status = EVO_STATUS_MAP[em.status] || 'delivered'
-          existingEvoIds.add(em.evoId)
+          existingKeySet.add(myKey)
           continue
         }
 
-        // 4. Nova mensagem
+        // 3. Nova mensagem
         const msgObj: Message = {
           id: em.evoId,
           evo_id: em.evoId,
@@ -188,7 +170,7 @@ export const useMessageStore = defineStore('messages', {
         }
 
         this.messages.push(msgObj)
-        existingEvoIds.add(em.evoId)
+        existingKeySet.add(myKey)
 
         toUpsert.push({
           id: em.evoId,
@@ -201,15 +183,16 @@ export const useMessageStore = defineStore('messages', {
           media_url: em.mediaUrl,
           mime_type: em.mimeType,
           caption: em.caption,
-          metadata: { source: 'sync' }
+          metadata: { source: 'sync', sync_at: new Date().toISOString() }
         })
       }
 
       // Bulk upsert para persistência no Supabase
       if (toUpsert.length > 0) {
         try {
-          // Usamos upsert para o Supabase também garantir que o contact_id será o ID Lojou oficial
-          await (client.from('messages') as any).upsert(toUpsert, { onConflict: 'id' })
+          // NOTA: Se o Supabase tiver PK apenas em 'id', ele ainda vai sobrescrever.
+          // Mas no store (estado local), agora estão blindadas por contacto.
+          await (client.from('messages') as any).upsert(toUpsert, { onConflict: 'id, contact_id' })
         } catch (e) {
           console.error('[DATABASE ERROR] Falha ao persistir sync:', e)
         }
@@ -218,56 +201,54 @@ export const useMessageStore = defineStore('messages', {
 
     async fetchFromSupabase(contactId: number | string, contactPhone?: string) {
       const client = useSupabaseClient()
+      const contactIdStr = String(contactId)
 
-      // Busca por contact_id (correto)
+      // Busca por contact_id oficial
       const { data, error } = await (client
         .from('messages') as any)
         .select('*')
-        .eq('contact_id', String(contactId))
+        .eq('contact_id', contactIdStr)
         .order('timestamp', { ascending: true })
 
-      // ✅ RECUPERAÇÃO: também busca mensagens que foram salvas com o
-      // telefone como contact_id (bug antigo) e as corrige no banco
-      let orphanData: any[] = []
+      // RECUPERAÇÃO: busca mensagens pelo telefone (webhook salva pelo phone as vezes)
+      let phoneData: any[] = []
       if (contactPhone) {
         const normalizedPhone = String(contactPhone).replace(/\D/g, '')
         const phoneVariants = [
           normalizedPhone,
           '258' + normalizedPhone,
-          normalizedPhone.replace(/^258/, ''),
-          '55' + normalizedPhone,
-          normalizedPhone.replace(/^55/, '')
+          normalizedPhone.replace(/^258/, '')
         ].filter(p => p.length >= 7)
 
-        for (const phoneVariant of phoneVariants) {
+        for (const pv of phoneVariants) {
           const { data: pData } = await (client
             .from('messages') as any)
             .select('*')
-            .eq('contact_id', phoneVariant)
-            .order('timestamp', { ascending: true })
-
+            .eq('contact_id', pv)
+          
           if (pData && pData.length > 0) {
-            console.log(`[RECOVERY] Encontradas ${pData.length} mensagens órfãs com contact_id="${phoneVariant}", corrigindo para ${contactId}`)
-            orphanData = [...orphanData, ...pData]
-
-            // Corrige contact_id no Supabase para o ID correto
-            await (client.from('messages') as any)
-              .update({ contact_id: String(contactId) })
-              .eq('contact_id', phoneVariant)
+            console.log(`[STORE] Recuperando ${pData.length} msgs de phone=${pv} para ID=${contactIdStr}`)
+            phoneData = [...phoneData, ...pData]
+            
+            // Corrige no banco para o ID oficial para evitar buscas futuras lentas
+            await (client.from('messages') as any).update({ contact_id: contactIdStr }).eq('contact_id', pv)
           }
         }
       }
 
-      const allData = [...(error ? [] : (data || [])), ...orphanData]
-      const existingIds = new Set(this.messages.map(m => m.id))
+      const allData = [...(error ? [] : (data || [])), ...phoneData]
+      
+      // Chaves existentes para evitar duplicação visual
+      const existingKeys = new Set(this.messages.map(m => `${m.id}_${m.contact_id}`))
 
       allData.forEach(m => {
-        if (!existingIds.has(m.id)) {
-          existingIds.add(m.id)
+        const key = `${m.id}_${contactIdStr}`
+        if (!existingKeys.has(key)) {
+          existingKeys.add(key)
           this.messages.push({
             id: m.id,
             evo_id: m.id,
-            contact_id: contactId, // usa sempre o ID correto
+            contact_id: contactId,
             content: m.content || '',
             status: m.status as any,
             timestamp: m.timestamp,
@@ -277,12 +258,6 @@ export const useMessageStore = defineStore('messages', {
             mimeType: m.mime_type,
             caption: m.caption
           })
-        } else {
-          // Se já existe no store mas com contact_id errado, corrige
-          const existing = this.messages.find(msg => msg.id === m.id)
-          if (existing && String(existing.contact_id) !== String(contactId)) {
-            existing.contact_id = contactId
-          }
         }
       })
     },

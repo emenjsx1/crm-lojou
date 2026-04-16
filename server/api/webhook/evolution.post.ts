@@ -119,7 +119,7 @@ export default defineEventHandler(async (event) => {
       mime_type: mimeType,
       caption,
       metadata: message
-    }, { onConflict: 'id' })
+    }, { onConflict: 'id, contact_id' })
 
   if (error) {
     console.error('[WEBHOOK ERROR] Erro no upsert Supabase:', error)
