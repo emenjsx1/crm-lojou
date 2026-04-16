@@ -8,6 +8,43 @@
         <p class="text-sm text-zinc-500 mt-1">Configure a integração com a Evolution API para envio de WhatsApp.</p>
       </div>
 
+      <!-- Lojou System Integration (Admin Token) -->
+      <div class="bg-white dark:bg-[#09090b] border border-zinc-200 dark:border-zinc-800 rounded-2xl overflow-hidden shadow-sm">
+        <div class="p-5 border-b border-zinc-200 dark:border-zinc-800 flex items-center gap-3">
+          <div class="w-9 h-9 rounded-xl bg-[#FF009D]/10 flex items-center justify-center">
+            <Icon name="ph:game-controller-fill" class="w-5 h-5 text-[#FF009D]" />
+          </div>
+          <div>
+            <h3 class="font-semibold text-zinc-900 dark:text-white">Integração Sistema (Jogo)</h3>
+            <p class="text-xs text-zinc-500">Token de acesso às APIs da Lojou.app</p>
+          </div>
+        </div>
+        <div class="p-6 flex flex-col gap-4">
+          <div class="flex flex-col gap-1.5">
+            <label class="text-xs font-bold text-zinc-600 dark:text-zinc-400 uppercase tracking-wider">Lojou Admin Token</label>
+            <div class="flex gap-2">
+              <input
+                v-model="lojouAdminToken"
+                type="password"
+                placeholder="Introduza o token de sessão do admin"
+                class="flex-1 px-4 py-2.5 bg-zinc-50 dark:bg-zinc-900/50 border border-zinc-200 dark:border-zinc-800 rounded-xl text-sm text-zinc-900 dark:text-zinc-100 focus:outline-none focus:border-[#FF009D] transition-colors"
+              />
+              <button
+                @click="saveAdminToken"
+                :disabled="actionLoading"
+                class="px-4 bg-[#FF009D] text-white rounded-xl text-xs font-bold hover:bg-[#D90085] transition-all disabled:opacity-50"
+              >
+                Salvar Token
+              </button>
+            </div>
+            <p class="text-[11px] text-zinc-400 flex items-start gap-1 mt-1">
+              <Icon name="ph:info-bold" class="w-3.5 h-3.5 mt-0.5" />
+              Este token será guardado de forma segura no backend e usado para identificar novos leads via WhatsApp.
+            </p>
+          </div>
+        </div>
+      </div>
+
       <!-- Evolution API Credentials -->
       <div class="bg-white dark:bg-[#09090b] border border-zinc-200 dark:border-zinc-800 rounded-2xl overflow-hidden shadow-sm">
         <div class="p-5 border-b border-zinc-200 dark:border-zinc-800 flex items-center gap-3">
@@ -16,18 +53,16 @@
           </div>
           <div>
             <h3 class="font-semibold text-zinc-900 dark:text-white">Evolution API — WhatsApp</h3>
-            <p class="text-xs text-zinc-500">Credenciais do servidor Evolution para envio de mensagens</p>
+            <p class="text-xs text-zinc-500">Credenciais para envio de mensagens</p>
           </div>
         </div>
-
         <div class="p-6 flex flex-col gap-4">
           <div class="flex flex-col gap-1.5">
             <label class="text-xs font-bold text-zinc-600 dark:text-zinc-400 uppercase tracking-wider">URL Base da Evolution</label>
             <input
               v-model="evolutionUrl"
-              :disabled="instanceStatus === 'connected'"
               placeholder="Ex: https://evo.seuservidor.com"
-              class="px-4 py-2.5 bg-zinc-50 dark:bg-zinc-900/50 border border-zinc-200 dark:border-zinc-800 rounded-xl text-sm text-zinc-900 dark:text-zinc-100 focus:outline-none focus:border-emerald-500 transition-colors disabled:opacity-50"
+              class="px-4 py-2.5 bg-zinc-50 dark:bg-zinc-900/50 border border-zinc-200 dark:border-zinc-800 rounded-xl text-sm text-zinc-900 dark:text-zinc-100 focus:outline-none focus:border-emerald-500 transition-colors"
             />
           </div>
           
@@ -35,27 +70,28 @@
             <label class="text-xs font-bold text-zinc-600 dark:text-zinc-400 uppercase tracking-wider">Global API Key</label>
             <input
               v-model="evolutionKey"
-              :disabled="instanceStatus === 'connected'"
               type="password"
               placeholder="••••••••••••••••"
-              class="px-4 py-2.5 bg-zinc-50 dark:bg-zinc-900/50 border border-zinc-200 dark:border-zinc-800 rounded-xl text-sm text-zinc-900 dark:text-zinc-100 focus:outline-none focus:border-emerald-500 transition-colors disabled:opacity-50"
+              class="px-4 py-2.5 bg-zinc-50 dark:bg-zinc-900/50 border border-zinc-200 dark:border-zinc-800 rounded-xl text-sm text-zinc-900 dark:text-zinc-100 focus:outline-none focus:border-emerald-500 transition-colors"
             />
           </div>
 
-          <!-- Instance Name (read-only, auto-generated) -->
           <div class="flex flex-col gap-1.5">
-            <label class="text-xs font-bold text-zinc-600 dark:text-zinc-400 uppercase tracking-wider">
-              Nome da Instância <span class="font-normal text-zinc-400 normal-case">(gerado automaticamente)</span>
-            </label>
-            <div class="flex gap-2">
-              <input
-                v-model="instanceName"
-                placeholder="Ex: lojou-crm"
-                class="flex-1 px-4 py-2.5 bg-zinc-50 dark:bg-zinc-900/50 border border-zinc-200 dark:border-zinc-800 rounded-xl text-sm text-zinc-900 dark:text-zinc-100 focus:outline-none focus:border-emerald-500 transition-colors"
-              />
-            </div>
-            <p class="text-[11px] text-zinc-400">Pode personalizar ou deixar o padrão "lojou-crm"</p>
+            <label class="text-xs font-bold text-zinc-600 dark:text-zinc-400 uppercase tracking-wider">Nome da Instância</label>
+            <input
+              v-model="instanceName"
+              placeholder="Ex: lojou-crm"
+              class="px-4 py-2.5 bg-zinc-50 dark:bg-zinc-900/50 border border-zinc-200 dark:border-zinc-800 rounded-xl text-sm text-zinc-900 dark:text-zinc-100 focus:outline-none focus:border-emerald-500 transition-colors"
+            />
           </div>
+
+          <UButton 
+            @click="saveCredentials" 
+            :loading="actionLoading"
+            color="black"
+            label="Salvar Credenciais Evolution"
+            block
+          />
         </div>
       </div>
 
@@ -161,6 +197,17 @@
               Desconectar
             </button>
 
+            <!-- Restart Instance (Bug Fix) -->
+            <button
+              v-if="instanceStatus === 'connected'"
+              @click="restartInstance"
+              :disabled="actionLoading"
+              class="px-5 py-3 bg-amber-500/10 text-amber-600 hover:bg-amber-500 hover:text-white font-semibold text-sm rounded-xl flex items-center gap-2 transition-all"
+            >
+              <Icon name="ph:lightning-bold" class="w-4 h-4" />
+              Reiniciar Sessão
+            </button>
+
             <!-- Delete Instance -->
             <button
               v-if="instanceStatus !== 'none'"
@@ -198,6 +245,7 @@ const autoConfigureWebhook = () => {
   evo.configureWebhook(webhookUrl)
 }
 
+const lojouAdminToken = ref('')
 const evolutionUrl = ref('')
 const evolutionKey = ref('')
 const instanceName = ref('lojou-crm')
@@ -234,6 +282,13 @@ onMounted(async () => {
     // Check existing status if credentials exist
     checkInstanceStatus()
   }
+
+  // Carregar Admin Token se existir (apenas placeholder se não for admin local)
+  const supabase = useSupabaseClient()
+  const { data: tokenData } = await supabase.from('settings').select('value').eq('key', 'lojou_admin_token').maybeSingle()
+  if (tokenData?.value && tokenData.value !== 'REPLACE_WITH_ACTUAL_TOKEN') {
+    lojouAdminToken.value = '••••••••••••••••'
+  }
 })
 
 onUnmounted(() => {
@@ -250,9 +305,31 @@ const saveCredentials = async () => {
     
     // Agora salva no Supabase (Backend Centralizado)
     await evo.saveSettings(url, key, instance)
-    alert('Configurações salvas no Supabase com sucesso!')
+    alert('Configurações da Evolution salvas com sucesso!')
   } catch (err: any) {
     errorMessage.value = 'Erro ao salvar no backend: ' + (err.message || 'Erro desconhecido')
+  } finally {
+    actionLoading.value = false
+  }
+}
+
+const saveAdminToken = async () => {
+  if (!lojouAdminToken.value || lojouAdminToken.value === '••••••••••••••••') {
+    alert('Por favor, introduza um novo token válido.')
+    return
+  }
+  
+  actionLoading.value = true
+  try {
+    const supabase = useSupabaseClient()
+    await supabase.from('settings').upsert({
+      key: 'lojou_admin_token',
+      value: lojouAdminToken.value,
+      updated_at: new Date().toISOString()
+    }, { onConflict: 'key' })
+    alert('Admin Token salvo com sucesso!')
+  } catch (err: any) {
+    alert('Erro ao salvar token: ' + err.message)
   } finally {
     actionLoading.value = false
   }
@@ -377,6 +454,20 @@ const disconnectInstance = async () => {
     clearInterval(pollTimer)
   } catch (err: any) {
     errorMessage.value = `Erro ao desconectar: ${err?.response?.data?.message || err.message}`
+  } finally {
+    actionLoading.value = false
+  }
+}
+
+const restartInstance = async () => {
+  if (!confirm('Deseja reiniciar a sessão do WhatsApp? Use isto se as mensagens estiverem travadas.')) return
+  actionLoading.value = true
+  try {
+    await evoApi.value.post(`/instance/restart/${instanceName.value}`)
+    alert('Comando de reinício enviado! Aguarde alguns segundos.')
+    setTimeout(checkInstanceStatus, 3000)
+  } catch (err: any) {
+    errorMessage.value = `Erro ao reiniciar: ${err?.response?.data?.message || err.message}`
   } finally {
     actionLoading.value = false
   }

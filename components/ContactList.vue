@@ -27,14 +27,27 @@
           <div class="w-10 h-10 rounded-full bg-zinc-200 dark:bg-zinc-700 flex items-center justify-center text-zinc-600 dark:text-zinc-300 font-bold text-sm shrink-0 uppercase">
              {{ getInitials(contact.full_name || contact.firstname || contact.name || 'S N') }}
           </div>
-          <div class="flex-1 min-w-0">
-             <div class="flex justify-between items-start">
-               <h4 class="font-medium text-sm text-zinc-900 dark:text-zinc-100 truncate pr-2 capitalize">{{ (contact.full_name || contact.firstname || contact.name || contact.phone_number || 'Sem nome').toLowerCase() }}</h4>
-               <span class="text-[10px] text-zinc-500 shrink-0">{{ formatTime(contact.lastMessageTime) }}</span>
-             </div>
-             <p class="text-xs text-zinc-500 truncate mt-0.5" v-if="contact.lastMessage">{{ contact.lastMessage }}</p>
-             <p class="text-xs text-zinc-500 truncate mt-0.5" v-else-if="contact.phone_number">{{ contact.phone_number }}</p>
-             <p class="text-xs text-zinc-500 truncate mt-0.5" v-else>Clique para conversar...</p>
+          <div class="flex-1 min-w-0 pr-1">
+            <div class="flex justify-between items-baseline mb-1">
+              <h4 class="text-xs font-bold text-zinc-900 dark:text-zinc-100 truncate flex items-center gap-1.5">
+                {{ (contact.full_name || contact.name || contact.firstname || 'Sem nome').toLowerCase() }}
+                <Icon v-if="contact.user_id" name="ph:seal-check-fill" class="w-3.5 h-3.5 text-emerald-500" />
+              </h4>
+              <span class="text-[10px] text-zinc-400 font-medium">{{ formatTime(contact.lastMessageTime) }}</span>
+            </div>
+            <div class="flex items-center justify-between gap-2">
+              <p class="text-[11px] text-zinc-500 dark:text-zinc-400 truncate leading-relaxed">
+                {{ contact.lastMessage || 'Sem mensagens' }}
+              </p>
+              <div class="shrink-0 flex gap-1">
+                <span v-if="!contact.user_id" class="px-1 py-0.5 bg-amber-500/10 text-amber-600 rounded-[4px] text-[8px] font-black uppercase tracking-tighter">
+                  LEAD
+                </span>
+                <span v-if="contact.unread" class="w-4 h-4 rounded-full bg-[#FF009D] text-white text-[9px] font-black flex items-center justify-center shadow-lg shadow-[#FF009D]/30">
+                  {{ contact.unread }}
+                </span>
+              </div>
+            </div>
           </div>
         </div>
       </div>

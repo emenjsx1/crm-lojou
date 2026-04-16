@@ -272,22 +272,53 @@ onMounted(() => {
       table: 'messages' 
     }, async (payload) => {
       const newMsg = payload.new
-      console.log('[REALTIME] Nova mensagem recebida:', newMsg.id)
+      const msgJid = newMsg.remote_jid || (newMsg.contact_id + '@s.whatsapp.net') // Fallback seguro
+      
+      console.log(`[REALTIME] Nova mensagem: ${newMsg.id} para JID: ${msgJid}`)
 
-      // 1. É para o contato ativo?
-      const phoneMatch = activeContact.value && (activeContact.value.phone_number || activeContact.value.phone || activeContact.value.whatsapp)
-      if (phoneMatch && String(newMsg.contact_id).replace(/\D/g, '') === String(phoneMatch).replace(/\D/g, '')) {
-        await messagesStore.fetchFromSupabase(String(phoneMatch).replace(/\D/g, ''))
-      } else {
-        // 2. É para algum contato que temos na lista de recentes?
-        const matched = contactsStore.contacts.find(c => {
-          const rawVal = c.phone_number || c.phone || (c as any).whatsapp || (c as any).phone_whatsapp
-          return String(c.id) === String(newMsg.contact_id) || (rawVal && String(rawVal).includes(String(newMsg.contact_id)))
-        })
-        
-        if (matched) {
-          markContactAsMessaged(matched)
-        }
+      // 1. Atualizar histórico se for o contato ativo
+      if (activeContact.value && activeContact.value.remote_jid === msgJid) {
+        await messagesStore.fetchFromSupabase(msgJid)
+      } 
+      
+      // 2. Notificação de Lead / Identificação
+      if (!newMsg.is_outgoing) {
+         const { data: contact } = await supabase
+           .from('contacts')
+           .select('user_id, name, remote_jid')
+           .eq('remote_jid', msgJid)
+           .maybeSingle()
+         
+         if (!contact || !contact.user_id) {
+            const toast = useToast()
+            toast.add({
+              title: 'Novo Lead!',
+              description: `Mensagem de ${contact?.name || msgJid.split('@')[0]}`,
+              icon: 'i-heroicons-user-plus',
+              color: 'amber',
+              timeout: 6000,
+              actions: [{
+                label: 'Atender',
+                click: () => {
+                  if (contact) selectContact(contact)
+                  else onNewChat(msgJid.split('@')[0])
+                }
+              }]
+            })
+         }
+         
+         // Adicionar aos recentes se não estiver lá
+         if (contact) markContactAsMessaged(contact)
+      }
+
+      // 3. Atualizar lista de recentes
+      const matched = contactsStore.contacts.find(c => {
+        const rawVal = c.phone_number || c.phone || (c as any).whatsapp || (c as any).phone_whatsapp
+        return String(c.id) === String(newMsg.contact_id) || (rawVal && String(rawVal).includes(msgPhone))
+      })
+      
+      if (matched) {
+        markContactAsMessaged(matched)
       }
     })
     .subscribe()
@@ -347,55 +378,72 @@ const activeConversations = computed(() => {
   
   return recentChats.value
     .map(contact => {
-      // Usamos a nova estrutura O(1) do store para performance fluida
-      const p = (contact.phone_number || contact.phone || contact.whatsapp || '').replace(/\D/g, '')
-    const contactMessages = messagesStore.getMessagesByPhone(p)
+      const p = contact.phone_number || contact.phone || contact.whatsapp || ''
+      const jid = p.includes('@') ? p : `${String(p).replace(/\D/g, '')}@s.whatsapp.net`
+      const contactMessages = messagesStore.getMessagesByJid(jid)
       if (contactMessages.length === 0) return null
       
       const lastMsg = contactMessages[contactMessages.length - 1]
       return {
         ...contact,
+        remote_jid: jid,
         lastMessage: lastMsg?.content || '...',
         lastMessageTime: lastMsg?.timestamp || contact.created_at || new Date().toISOString()
       }
     })
-    .filter(c => c !== null) // Apenas contactos com conversas ativas no sistema
+    .filter(c => c !== null)
     .sort((a, b) => new Date(b.lastMessageTime).getTime() - new Date(a.lastMessageTime).getTime())
 })
 
-// Mensagens do contacto activo — ordenadas
+// Mensagens do contacto activo — ordenadas por JID
 const activeMessages = computed(() => {
   if (!activeContact.value) return []
-  const p = (activeContact.value.phone_number || activeContact.value.phone || activeContact.value.whatsapp || '').replace(/\D/g, '')
-  return messagesStore.getMessagesByPhone(p)
+  const p = activeContact.value.remote_jid || activeContact.value.phone_number || activeContact.value.phone || activeContact.value.whatsapp || ''
+  const jid = p.includes('@') ? p : `${String(p).replace(/\D/g, '')}@s.whatsapp.net`
+  return messagesStore.getMessagesByJid(jid)
 })
 
 // Selecciona contacto e carrega histórico
 const selectContact = async (contact: any) => {
-  activeContact.value = contact
-  clearInterval(pollTimer)
+  const phoneRaw = contact.phone_number || contact.phone || contact.whatsapp
+  if (!phoneRaw) return
 
-  const phone = contact.phone_number || contact.phone || contact.whatsapp
-  if (!phone) return
+  const normalizedPhone = String(phoneRaw).replace(/\D/g, '')
+  const jid = phoneRaw.includes('@') ? phoneRaw : `${normalizedPhone}@s.whatsapp.net`
 
-  // Primeiro carrega o que já temos no Supabase (offline/cache)
-  await messagesStore.fetchFromSupabase(phone)
+  // Buscar dados completos do contacto no Supabase usando o IDENTIFICADOR ÚNICO (remoteJid)
+  const { data: fullContact } = await supabase
+    .from('contacts')
+    .select('*, users(*)')
+    .eq('remote_jid', jid)
+    .maybeSingle()
 
-  // Depois sincroniza o histórico mais recente da Evolution
-  const history = await evo.fetchHistory(phone)
-  if (history.length > 0) {
-    await messagesStore.syncFromEvolution(phone, history)
-    markContactAsMessaged(contact)
+  if (fullContact) {
+    activeContact.value = { ...contact, ...fullContact }
+  } else {
+    // Se não existir, garantir que temos pelo menos o JID correto para o store
+    activeContact.value = { ...contact, remote_jid: jid }
   }
 
-  // Polling para o contacto activo (mais frequente/profundo enquanto a conversa está aberta)
+  clearInterval(pollTimer)
+
+  // Primeiro carrega o que já temos no Supabase (offline/cache)
+  await messagesStore.fetchFromSupabase(jid)
+
+  // Depois sincroniza o histórico mais recente da Evolution
+  const history = await evo.fetchHistory(normalizedPhone)
+  if (history.length > 0) {
+    await messagesStore.syncFromEvolution(jid, history)
+    markContactAsMessaged(activeContact.value)
+  }
+
+  // Polling para o contacto activo
   pollTimer = setInterval(async () => {
     if (!activeContact.value) return
-    const ph = activeContact.value.phone_number || activeContact.value.phone || activeContact.value.whatsapp
-    if (!ph) return
-    const msgs = await evo.fetchHistory(ph, 20)
+    const currentJid = activeContact.value.remote_jid
+    const msgs = await evo.fetchHistory(normalizedPhone, 20)
     if (msgs.length > 0) {
-      await messagesStore.syncFromEvolution(ph, msgs)
+      await messagesStore.syncFromEvolution(currentJid, msgs)
     }
   }, POLL_INTERVAL)
 }
@@ -408,10 +456,11 @@ onUnmounted(() => {
 const onDeleteMessage = async (msgId: string) => {
   try {
     await evo.deleteMessage(msgId)
-    // Remove do store
-    const p = (activeContact.value?.phone_number || activeContact.value?.phone || activeContact.value?.whatsapp || '').replace(/\D/g, '')
-    messagesStore.clearPhone(p) 
-    await messagesStore.fetchFromSupabase(p)
+    const jid = activeContact.value?.remote_jid
+    if (jid) {
+      messagesStore.clearJid(jid) 
+      await messagesStore.fetchFromSupabase(jid)
+    }
   } catch (err) {
     console.error('[DELETE MESSAGE] Erro:', err)
   }
@@ -429,19 +478,19 @@ const onSendText = async (content: string, quotedId?: string) => {
     : content
 
   sending.value = true
-  // ID local temporário
-  const localId = messagesStore.addOutgoing(activeContact.value.id, finalContent, 'text')
+  // ID local temporário vinculado ao JID
+  const jid = activeContact.value.remote_jid
+  const localId = messagesStore.addOutgoing(jid, finalContent, 'text')
 
   try {
     const res = await evo.sendText(rawPhone, finalContent, quotedId)
+    const messageId = res.key?.id || res.id
     
-    // Sucesso! Agora pegamos o ID real da Evolution e salvamos IMEDIATAMENTE no Supabase
-    const evoId = res.key?.id || res.id
-    if (evoId) {
+    if (messageId) {
       await messagesStore.addAndSaveOutgoing({
         localId,
-        evoId,
-        phone: rawPhone,
+        messageId,
+        jid,
         content: finalContent,
         type: 'text'
       })
@@ -470,26 +519,24 @@ const onSendMedia = async (opts: {
 
   sending.value = true
 
+  const jid = activeContact.value.remote_jid
   const previewContent = opts.caption || (opts.type === 'image' ? '[Imagem]' : opts.type === 'audio' ? '[Áudio]' : '[Ficheiro]')
-  const localId = messagesStore.addOutgoing(activeContact.value.id, previewContent, opts.type, {
-    mediaBase64: opts.base64.includes(',') ? opts.base64.split(',')[1] : opts.base64,
+  const localId = messagesStore.addOutgoing(jid, previewContent, opts.type, {
     mimeType: opts.mimeType,
     caption: opts.caption
   })
 
   try {
     const res = await evo.sendMedia(rawPhone, { ...opts, quotedId: (opts as any).quotedId })
+    const messageId = res.key?.id || res.id
     
-    // Sucesso! Registro imediato no banco
-    const evoId = res.key?.id || res.id
-    if (evoId) {
+    if (messageId) {
       await messagesStore.addAndSaveOutgoing({
         localId,
-        evoId,
-        phone: rawPhone,
+        messageId,
+        jid,
         content: previewContent,
         type: opts.type,
-        mediaUrl: res.message?.imageMessage?.url || res.message?.audioMessage?.url || res.message?.videoMessage?.url || res.message?.documentMessage?.url,
         mimeType: opts.mimeType,
         caption: opts.caption
       })

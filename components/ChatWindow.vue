@@ -2,7 +2,7 @@
   <div class="flex-1 flex flex-col bg-zinc-50 dark:bg-zinc-950 min-w-0">
     <template v-if="contact">
       <!-- Header -->
-      <div class="h-16 px-4 lg:px-6 border-b dark:border-zinc-800 bg-white dark:bg-[#09090b] flex items-center justify-between shadow-sm z-10 shrink-0">
+      <div class="px-4 lg:px-6 py-3 border-b dark:border-zinc-800 bg-white dark:bg-[#09090b] flex items-center justify-between shadow-sm z-10 shrink-0">
         <div class="flex items-center gap-2 lg:gap-3">
           <UButton
             color="gray"
@@ -11,23 +11,53 @@
             class="lg:hidden"
             @click="$emit('back')"
           />
-          <div class="w-8 h-8 lg:w-9 lg:h-9 rounded-full bg-[#FF009D]/10 flex items-center justify-center text-[#FF009D] font-bold text-xs lg:text-sm uppercase shrink-0">
+          <div class="w-10 h-10 lg:w-11 lg:h-11 rounded-full bg-gradient-to-br from-[#FF009D] to-[#80004e] flex items-center justify-center text-white font-bold text-xs lg:text-sm uppercase shrink-0 shadow-lg shadow-[#FF009D]/20">
             {{ getInitials(contact.full_name || contact.firstname || contact.name || 'CN') }}
           </div>
           <div class="min-w-0">
-            <h3 class="font-semibold text-zinc-900 dark:text-white capitalize text-xs lg:text-sm truncate">
+            <h3 class="font-bold text-zinc-900 dark:text-white capitalize text-sm lg:text-base truncate flex items-center gap-2">
               {{ (contact.full_name || contact.firstname || contact.name || 'Sem nome').toLowerCase() }}
+              <Icon v-if="contact.users" name="ph:seal-check-fill" class="w-4 h-4 text-emerald-500" />
             </h3>
-            <p class="text-[10px] lg:text-xs text-zinc-500 truncate">{{ formattedPhone || contact.email || '—' }}</p>
+            <div class="flex items-center gap-2 text-[10px] lg:text-xs">
+              <span class="text-zinc-500 font-medium">{{ formattedPhone || '—' }}</span>
+              <span v-if="contact.users" class="px-1.5 py-0.5 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 rounded text-[9px] font-bold uppercase tracking-wider">
+                Usuário Sistema
+              </span>
+              <span v-else class="px-1.5 py-0.5 bg-amber-500/10 text-amber-600 dark:text-amber-400 rounded text-[9px] font-bold uppercase tracking-wider">
+                Lead Novo
+              </span>
+            </div>
           </div>
         </div>
-        <div class="flex items-center gap-2">
-          <span v-if="hasEvolution" class="text-[10px] font-bold px-2 py-1 bg-emerald-500/10 text-emerald-500 rounded-md uppercase tracking-wider flex items-center gap-1">
-            <Icon name="ph:check-circle-fill" class="w-3 h-3" /> Evolution Ativa
-          </span>
-          <span v-else class="text-[10px] font-bold px-2 py-1 bg-amber-500/10 text-amber-500 rounded-md uppercase tracking-wider">
-            Sem Evolution
-          </span>
+        <div class="flex items-center gap-3">
+          <div v-if="contact.users" class="hidden md:flex flex-col items-end pr-3 border-r dark:border-zinc-800">
+            <span class="text-[10px] text-zinc-400 font-bold uppercase tracking-widest">Saldo Atual</span>
+            <span class="text-sm font-black text-emerald-600 dark:text-emerald-400">
+              {{ (contact.users.balance || 0).toLocaleString('pt-PT', { style: 'currency', currency: 'MZN' }) }}
+            </span>
+          </div>
+          <div class="flex items-center gap-2">
+            <span v-if="hasEvolution" class="w-2.5 h-2.5 bg-emerald-500 rounded-full animate-pulse tooltip-trigger" title="Conexão Evolution Ativa"></span>
+            <span v-else class="w-2.5 h-2.5 bg-amber-500 rounded-full tooltip-trigger" title="Sem Conexão Evolution"></span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Lead Alert Banner -->
+      <div v-if="!contact.users" class="px-4 py-2.5 bg-gradient-to-r from-amber-500/10 via-amber-500/5 to-transparent border-b border-amber-500/20 flex items-center justify-between shrink-0">
+        <div class="flex items-center gap-3">
+          <div class="w-8 h-8 rounded-lg bg-amber-500/10 flex items-center justify-center text-amber-600">
+            <Icon name="ph:user-plus-bold" class="w-5 h-5" />
+          </div>
+          <div>
+            <p class="text-sm font-bold text-amber-800 dark:text-amber-400 uppercase tracking-tight">Número não cadastrado</p>
+            <p class="text-[11px] text-amber-700/70 dark:text-amber-400/70">Este contato não está vinculado ao sistema de jogo.</p>
+          </div>
+        </div>
+        <div class="flex gap-2">
+          <UButton size="2xs" color="amber" variant="soft" label="Criar Usuário" icon="i-heroicons-plus" />
+          <UButton size="2xs" color="gray" variant="ghost" label="Ignorar" />
         </div>
       </div>
 

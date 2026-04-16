@@ -1,15 +1,15 @@
 import { defineEventHandler, readBody } from 'h3'
 import { useRuntimeConfig } from '#imports'
 import { createClient } from '@supabase/supabase-js'
+import axios from 'axios'
 
 export default defineEventHandler(async (event) => {
   const body = await readBody(event)
   const eventName = (body.event || body.type || '').toUpperCase()
   
-  console.log(`[WEBHOOK AUDIT] Evento recebido: ${eventName}`)
-  console.log(`[WEBHOOK AUDIT] Payload completo:`, JSON.stringify(body, null, 2))
-
-  // Lista de eventos que nos interessam para atualizar conversas
+  // 1. Log Payload Completo (Audit)
+  console.log(`[WEBHOOK] Evento: ${eventName}`)
+  
   const allowedEvents = [
     'MESSAGES_UPSERT', 
     'MESSAGES_UPDATE', 
@@ -18,7 +18,6 @@ export default defineEventHandler(async (event) => {
   ]
 
   if (!allowedEvents.includes(eventName)) {
-    console.log(`[WEBHOOK AUDIT] Evento ${eventName} ignorado (fora da lista permitida)`)
     return { status: 'ignored', event: eventName }
   }
 
@@ -26,32 +25,93 @@ export default defineEventHandler(async (event) => {
   const message = payload.message || payload
   
   if (!message || !message.key) {
-    console.log(`[WEBHOOK AUDIT] Payload inválido ou sem chave:`, JSON.stringify(body))
     return { status: 'error', message: 'Invalid payload' }
   }
 
+  // 2. Identificadores Únicos Obrigatórios
   const remoteJid = message.key.remoteJid || ''
-  if (remoteJid.includes('@g.us')) {
-    console.log(`[WEBHOOK AUDIT] Mensagem de grupo ignorada: ${remoteJid}`)
-    return { status: 'ignored', reason: 'group_message' }
+  const messageId = message.key.id || ''
+
+  if (!remoteJid || remoteJid.includes('@g.us')) {
+    return { status: 'ignored', reason: remoteJid.includes('@g.us') ? 'group_message' : 'no_jid' }
   }
 
   const phone = remoteJid.split('@')[0]
   if (!phone || phone.includes('status')) {
-    console.log(`[WEBHOOK AUDIT] JID inválido ou status ignorado: ${remoteJid}`)
     return { status: 'ignored', reason: 'invalid_jid' }
   }
 
-  console.log(`[WEBHOOK AUDIT] Processando mensagem - ID: ${message.key.id}, De: ${phone}, FromMe: ${message.key.fromMe}`)
-
-  // Configuração do Supabase (Usando runtime config do Nuxt)
   const config = useRuntimeConfig()
   const supabase = createClient(
     config.public.supabaseUrl as string,
     config.public.supabaseKey as string
   )
 
-  // Extração de dados
+  // 3. Garantir Existência do Contato (Mapping: remoteJid -> contact)
+  let { data: contactRecord } = await supabase
+    .from('contacts')
+    .select('*, users(*)')
+    .eq('remote_jid', remoteJid)
+    .maybeSingle()
+
+  if (!contactRecord) {
+    console.log(`[WEBHOOK] Criando novo contato para JID: ${remoteJid}`)
+    
+    // Tentar buscar informações do usuário no sistema Lojou se possível
+    // NOTA: O usuário mencionou no áudio que o token/session já deve estar configurado internamente.
+    // Usaremos o token de admin se disponível no banco para identificação inicial.
+    
+    const { data: tokenSetting } = await supabase
+      .from('settings')
+      .select('value')
+      .eq('key', 'lojou_admin_token')
+      .maybeSingle()
+    
+    const adminToken = tokenSetting?.value
+    let userData = null
+
+    if (adminToken && adminToken !== 'REPLACE_WITH_ACTUAL_TOKEN') {
+      try {
+        const lojouRes = await axios.get('https://api.lojou.app/api/admin/users', {
+          params: { search: phone, is_paginate: 0 },
+          headers: { Authorization: `Bearer ${adminToken}` }
+        })
+        const users = lojouRes.data?.users || lojouRes.data?.data || []
+        userData = Array.isArray(users) ? users.find((u: any) => 
+          String(u.phone_number || u.phone || '').includes(phone)
+        ) : null
+      } catch (e) {}
+    }
+
+    let userId = null
+    if (userData) {
+      const { data: localUser } = await supabase
+        .from('users')
+        .upsert({
+          id: String(userData.id),
+          name: userData.full_name || userData.name || userData.firstname,
+          phone: phone,
+          balance: userData.balance || 0,
+          metadata: userData
+        })
+        .select().single()
+      userId = localUser?.id
+    }
+
+    const { data: newContact } = await supabase
+      .from('contacts')
+      .insert({
+        remote_jid: remoteJid,
+        phone: phone,
+        user_id: userId,
+        name: payload.pushName || message.pushName || userData?.name || phone,
+        metadata: { source: 'webhook_auto_create', pushName: payload.pushName }
+      })
+      .select().single()
+    contactRecord = newContact
+  }
+
+  // 4. Processamento de Conteúdo
   let msgContent = message.message || {}
   if (msgContent.ephemeralMessage) msgContent = msgContent.ephemeralMessage.message || {}
   if (msgContent.viewOnceMessage) msgContent = msgContent.viewOnceMessage.message || {}
@@ -90,17 +150,15 @@ export default defineEventHandler(async (event) => {
     mimeType = msgContent.documentMessage.mimetype
   }
 
-  // ISOLAMENTO TOTAL: No banco de dados, indexamos as mensagens pelo telefone (WhatsApp ID)
-  // O frontend é responsável por mostrar estas mensagens dentro do perfil do contacto correspondente.
-  const finalContactId = phone
-  console.log(`[WEBHOOK] Mensagem recebida para o telefone: ${phone}`)
-
-  // Upsert no banco
-  const { error } = await supabase
+  // 5. Upsert de Mensagem (Trava Anti-Bug: Unique por message_id e remote_jid)
+  // Nota: Salvamos contact_id (UUID) para relação correta e o remote_jid para auditoria
+  const { error: msgError } = await supabase
     .from('messages')
     .upsert({
-      id: message.key.id,
-      contact_id: finalContactId, 
+      id: messageId, // Manter id como PK ou alternativo
+      message_id: messageId,
+      remote_jid: remoteJid,
+      contact_id: contactRecord?.id, // Vínculo UUID
       content: content || '',
       type,
       is_outgoing: !!message.key.fromMe || eventName === 'SEND_MESSAGE',
@@ -109,13 +167,17 @@ export default defineEventHandler(async (event) => {
       media_url: mediaUrl,
       mime_type: mimeType,
       caption,
-      metadata: message
-    }, { onConflict: 'id, contact_id' })
+      metadata: body // Salvar payload completo para auditoria
+    }, { onConflict: 'message_id' })
 
-  if (error) {
-    console.error('[WEBHOOK ERROR] Erro no upsert Supabase:', error)
-    return { status: 'error', error }
+  if (msgError) {
+    console.error('[WEBHOOK ERROR] Falha ao salvar mensagem:', msgError)
   }
 
-  return { status: 'success', id: message.key.id }
+  return { 
+    status: 'success', 
+    jid: remoteJid, 
+    contact_id: contactRecord?.id 
+  }
 })
+
