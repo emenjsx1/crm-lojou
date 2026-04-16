@@ -29,38 +29,38 @@ const EVO_STATUS_MAP: Record<string, Message['status']> = {
 
 export const useMessageStore = defineStore('messages', {
   state: () => ({
-    // Agrupamos mensagens por contactId para performance O(1) e isolamento total
-    messagesByContact: {} as Record<string, Message[]>,
+    // Agrupamos mensagens por NÚMERO DE TELEFONE (o único ID real e único do WhatsApp)
+    messagesByPhone: {} as Record<string, Message[]>,
     loading: false
   }),
   getters: {
-    getMessagesByContact: (state) => (contactId: number | string) => {
-      if (!contactId) return []
-      const cidStr = String(contactId)
-      return (state.messagesByContact[cidStr] || [])
+    getMessagesByPhone: (state) => (phone: string) => {
+      if (!phone) return []
+      const p = phone.replace(/\D/g, '')
+      return (state.messagesByPhone[p] || [])
         .slice()
         .sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime())
     },
-    getLatestMessageByContact: (state) => (contactId: number | string) => {
-      if (!contactId) return null
-      const cidStr = String(contactId)
-      const msgs = state.messagesByContact[cidStr] || []
+    getLatestMessageByPhone: (state) => (phone: string) => {
+      if (!phone) return null
+      const p = phone.replace(/\D/g, '')
+      const msgs = state.messagesByPhone[p] || []
       if (msgs.length === 0) return null
-      // Retorna a mais recente
       return msgs.reduce((prev, current) => 
         new Date(current.timestamp) > new Date(prev.timestamp) ? current : prev
       )
     }
   },
   actions: {
-    // Helper interno para inserir/atualizar sem duplicados por contato
+    // Helper interno para inserir/atualizar sem duplicados por telefone
     upsertIntoStore(msg: Message) {
-      const cid = String(msg.contact_id)
-      if (!this.messagesByContact[cid]) {
-        this.messagesByContact[cid] = []
+      // Garantimos que o contact_id aqui é sempre o telefone (ID estável do WhatsApp)
+      const phoneId = String(msg.contact_id).replace(/\D/g, '')
+      if (!this.messagesByPhone[phoneId]) {
+        this.messagesByPhone[phoneId] = []
       }
       
-      const list = this.messagesByContact[cid]
+      const list = this.messagesByPhone[phoneId]
       const index = list.findIndex(m => m.id === msg.id)
       
       if (index !== -1) {
@@ -71,7 +71,7 @@ export const useMessageStore = defineStore('messages', {
     },
 
     addOutgoing(
-      contactId: number | string,
+      phone: string,
       content: string,
       type: Message['type'] = 'text',
       media?: Pick<Message, 'mediaBase64' | 'mediaUrl' | 'mimeType' | 'caption'>
@@ -79,7 +79,7 @@ export const useMessageStore = defineStore('messages', {
       const id = 'local_' + Date.now()
       this.upsertIntoStore({
         id,
-        contact_id: contactId,
+        contact_id: phone.replace(/\D/g, ''),
         content,
         status: 'sending',
         timestamp: new Date().toISOString(),
@@ -93,7 +93,7 @@ export const useMessageStore = defineStore('messages', {
     async addAndSaveOutgoing(params: {
       localId: number | string,
       evoId: string,
-      contactId: number | string,
+      phone: string,
       content: string,
       type: Message['type'],
       mediaUrl?: string,
@@ -101,10 +101,10 @@ export const useMessageStore = defineStore('messages', {
       caption?: string
     }) {
       const client = useSupabaseClient()
-      const cidStr = String(params.contactId)
+      const p = params.phone.replace(/\D/g, '')
       
       // Atualiza no store local
-      const list = this.messagesByContact[cidStr] || []
+      const list = this.messagesByPhone[p] || []
       const msg = list.find(m => m.id === params.localId)
       if (msg) {
         msg.id = params.evoId
@@ -114,7 +114,7 @@ export const useMessageStore = defineStore('messages', {
 
       const payload = {
         id: params.evoId,
-        contact_id: cidStr,
+        contact_id: p, // Salva pelo telefone para isolamento
         content: params.content,
         type: params.type,
         is_outgoing: true,
@@ -132,30 +132,30 @@ export const useMessageStore = defineStore('messages', {
       }
     },
 
-    updateStatus(msgId: number | string, status: Message['status'], contactId?: string | number) {
-      if (contactId) {
-        const list = this.messagesByContact[String(contactId)] || []
+    updateStatus(msgId: number | string, status: Message['status'], phone?: string) {
+      if (phone) {
+        const p = phone.replace(/\D/g, '')
+        const list = this.messagesByPhone[p] || []
         const msg = list.find(m => m.id === msgId || m.evo_id === msgId)
         if (msg) msg.status = status
       } else {
-        // Fallback lento se não souber o contato (raro no novo sistema)
-        Object.values(this.messagesByContact).forEach(list => {
+        Object.values(this.messagesByPhone).forEach(list => {
           const msg = list.find(m => m.id === msgId || m.evo_id === msgId)
           if (msg) msg.status = status
         })
       }
     },
 
-    async syncFromEvolution(contactId: number | string, evoMessages: EvoMessage[]) {
+    async syncFromEvolution(phone: string, evoMessages: EvoMessage[]) {
       const client = useSupabaseClient()
-      const contactIdStr = String(contactId)
+      const p = phone.replace(/\D/g, '')
       const toUpsert: any[] = []
 
       for (const em of evoMessages) {
         if (!em.evoId) continue
 
         // Procura optimista
-        const list = this.messagesByContact[contactIdStr] || []
+        const list = this.messagesByPhone[p] || []
         const optimistic = list.find(m =>
           !m.evo_id &&
           m.is_outgoing === em.fromMe &&
@@ -173,7 +173,7 @@ export const useMessageStore = defineStore('messages', {
         const msgObj: Message = {
           id: em.evoId,
           evo_id: em.evoId,
-          contact_id: contactId,
+          contact_id: p,
           content: em.content,
           status: EVO_STATUS_MAP[em.status] || 'delivered',
           timestamp: new Date(em.timestamp).toISOString(),
@@ -189,7 +189,7 @@ export const useMessageStore = defineStore('messages', {
 
         toUpsert.push({
           id: em.evoId,
-          contact_id: contactIdStr,
+          contact_id: p,
           content: em.content || '',
           type: em.type,
           is_outgoing: em.fromMe,
@@ -211,35 +211,26 @@ export const useMessageStore = defineStore('messages', {
       }
     },
 
-    async fetchFromSupabase(contactId: number | string, contactPhone?: string) {
+    async fetchFromSupabase(phone: string) {
       const client = useSupabaseClient()
-      const contactIdStr = String(contactId)
+      const p = phone.replace(/\D/g, '')
 
+      // Busca mensagens estritamente vinculadas a este número de telefone
       const { data, error } = await (client.from('messages') as any)
         .select('*')
-        .eq('contact_id', contactIdStr)
+        .eq('contact_id', p)
         .order('timestamp', { ascending: true })
 
-      let phoneData: any[] = []
-      if (contactPhone) {
-        const normalizedPhone = String(contactPhone).replace(/\D/g, '')
-        const phoneVariants = [normalizedPhone, '258' + normalizedPhone, normalizedPhone.replace(/^258/, '')].filter(p => p.length >= 7)
-
-        for (const pv of phoneVariants) {
-          const { data: pData } = await (client.from('messages') as any).select('*').eq('contact_id', pv)
-          if (pData && pData.length > 0) {
-            phoneData = [...phoneData, ...pData]
-            await (client.from('messages') as any).delete().eq('contact_id', pv)
-          }
-        }
+      if (error) {
+        console.error('[STORE] Erro ao buscar do Supabase:', error)
+        return
       }
 
-      const allData = [...(error ? [] : (data || [])), ...phoneData]
-      allData.forEach(m => {
+      (data || []).forEach(m => {
         this.upsertIntoStore({
           id: m.id,
           evo_id: m.id,
-          contact_id: contactId,
+          contact_id: p,
           content: m.content || '',
           status: m.status as any,
           timestamp: m.timestamp,
@@ -252,8 +243,8 @@ export const useMessageStore = defineStore('messages', {
       })
     },
 
-    clearContact(contactId: number | string) {
-      delete this.messagesByContact[String(contactId)]
+    clearPhone(phone: string) {
+      delete this.messagesByPhone[phone.replace(/\D/g, '')]
     }
   }
 })

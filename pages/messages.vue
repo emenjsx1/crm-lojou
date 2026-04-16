@@ -174,7 +174,7 @@ const syncAll = async () => {
         // Buscar histórico (últimas 40 mensagens de cada)
         const history = await evo.fetchHistory(phone, 40)
         if (history && (history as any[]).length > 0) {
-          await messagesStore.syncFromEvolution((contact as any).id, history)
+          await messagesStore.syncFromEvolution(phone, history)
           markContactAsMessaged(contact)
         }
       }
@@ -248,7 +248,7 @@ onMounted(() => {
 
           const msgs = await evo.fetchHistory(phone, 12)
           if (msgs && (msgs as any[]).length > 0) {
-            await messagesStore.syncFromEvolution(matched.id, msgs)
+            await messagesStore.syncFromEvolution(chatPhone, msgs)
             
             // Se as mensagens novas chegarem, atualizamos a lista de "recentes" se necessário
             const isRecent = recentChats.value.some(rc => String(rc.id) === String(matched.id))
@@ -275,8 +275,9 @@ onMounted(() => {
       console.log('[REALTIME] Nova mensagem recebida:', newMsg.id)
 
       // 1. É para o contato ativo?
-      if (activeContact.value && String(newMsg.contact_id) === String(activeContact.value.id)) {
-        await messagesStore.fetchFromSupabase(activeContact.value.id)
+      const phoneMatch = activeContact.value && (activeContact.value.phone_number || activeContact.value.phone || activeContact.value.whatsapp)
+      if (phoneMatch && String(newMsg.contact_id).replace(/\D/g, '') === String(phoneMatch).replace(/\D/g, '')) {
+        await messagesStore.fetchFromSupabase(String(phoneMatch).replace(/\D/g, ''))
       } else {
         // 2. É para algum contato que temos na lista de recentes?
         const matched = contactsStore.contacts.find(c => {
@@ -347,7 +348,8 @@ const activeConversations = computed(() => {
   return recentChats.value
     .map(contact => {
       // Usamos a nova estrutura O(1) do store para performance fluida
-      const contactMessages = messagesStore.getMessagesByContact(contact.id)
+      const p = (contact.phone_number || contact.phone || contact.whatsapp || '').replace(/\D/g, '')
+    const contactMessages = messagesStore.getMessagesByPhone(p)
       if (contactMessages.length === 0) return null
       
       const lastMsg = contactMessages[contactMessages.length - 1]
@@ -364,7 +366,8 @@ const activeConversations = computed(() => {
 // Mensagens do contacto activo — ordenadas
 const activeMessages = computed(() => {
   if (!activeContact.value) return []
-  return messagesStore.getMessagesByContact(activeContact.value.id)
+  const p = (activeContact.value.phone_number || activeContact.value.phone || activeContact.value.whatsapp || '').replace(/\D/g, '')
+  return messagesStore.getMessagesByPhone(p)
 })
 
 // Selecciona contacto e carrega histórico
@@ -376,13 +379,12 @@ const selectContact = async (contact: any) => {
   if (!phone) return
 
   // Primeiro carrega o que já temos no Supabase (offline/cache)
-  // Passa o telefone para recuperar mensagens que foram salvas com o phone como contact_id (bug antigo)
-  await messagesStore.fetchFromSupabase(contact.id, phone)
+  await messagesStore.fetchFromSupabase(phone)
 
   // Depois sincroniza o histórico mais recente da Evolution
   const history = await evo.fetchHistory(phone)
   if (history.length > 0) {
-    await messagesStore.syncFromEvolution(contact.id, history)
+    await messagesStore.syncFromEvolution(phone, history)
     markContactAsMessaged(contact)
   }
 
@@ -393,7 +395,7 @@ const selectContact = async (contact: any) => {
     if (!ph) return
     const msgs = await evo.fetchHistory(ph, 20)
     if (msgs.length > 0) {
-      await messagesStore.syncFromEvolution(activeContact.value.id, msgs)
+      await messagesStore.syncFromEvolution(ph, msgs)
     }
   }, POLL_INTERVAL)
 }
@@ -407,8 +409,9 @@ const onDeleteMessage = async (msgId: string) => {
   try {
     await evo.deleteMessage(msgId)
     // Remove do store
-    messagesStore.clearContact(activeContact.value?.id) // Limpeza segura
-    await messagesStore.fetchFromSupabase(activeContact.value?.id) // Recarrega o que sobrou
+    const p = (activeContact.value?.phone_number || activeContact.value?.phone || activeContact.value?.whatsapp || '').replace(/\D/g, '')
+    messagesStore.clearPhone(p) 
+    await messagesStore.fetchFromSupabase(p)
   } catch (err) {
     console.error('[DELETE MESSAGE] Erro:', err)
   }
@@ -438,7 +441,7 @@ const onSendText = async (content: string, quotedId?: string) => {
       await messagesStore.addAndSaveOutgoing({
         localId,
         evoId,
-        contactId: activeContact.value.id,
+        phone: rawPhone,
         content: finalContent,
         type: 'text'
       })
@@ -483,7 +486,7 @@ const onSendMedia = async (opts: {
       await messagesStore.addAndSaveOutgoing({
         localId,
         evoId,
-        contactId: activeContact.value.id,
+        phone: rawPhone,
         content: previewContent,
         type: opts.type,
         mediaUrl: res.message?.imageMessage?.url || res.message?.audioMessage?.url || res.message?.videoMessage?.url || res.message?.documentMessage?.url,
