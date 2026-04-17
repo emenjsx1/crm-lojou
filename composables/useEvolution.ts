@@ -281,7 +281,7 @@ export const useEvolution = () => {
     const res = await c.http.post(`/instance/setWebhook/${c.instance}`, {
       url: webhookUrl,
       enabled: true,
-      events: ['MESSAGES_UPSERT', 'MESSAGES_UPDATE', 'SEND_MESSAGE']
+      events: ['MESSAGES_UPSERT', 'MESSAGES_UPDATE', 'MESSAGES_SET', 'SEND_MESSAGE']
     })
     return res.data
   }

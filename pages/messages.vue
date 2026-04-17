@@ -202,6 +202,8 @@ let globalPollTimer: any = null
 let channel: any = null
 let supabase: any = null
 const POLL_INTERVAL = 4000 // 4 segundos
+let globalPollFailCount = 0
+const GLOBAL_POLL_MAX_FAILS = 5
 
 onMounted(async () => {
   if (typeof window !== 'undefined') {
@@ -263,8 +265,15 @@ onMounted(async () => {
           }
         }
       }
+      globalPollFailCount = 0
     } catch (e) {
-      console.warn('[POLLING AUDIT] Falhou:', e)
+      globalPollFailCount++
+      console.warn(`[POLLING AUDIT] Falha ${globalPollFailCount}/${GLOBAL_POLL_MAX_FAILS}:`, e)
+      if (globalPollFailCount >= GLOBAL_POLL_MAX_FAILS) {
+        console.error('[POLLING AUDIT] Polling desativado após 5 falhas consecutivas — verifique a conexão Evolution')
+        clearInterval(globalPollTimer)
+        globalPollTimer = null
+      }
     }
   }, 10000) // Aumentado para 10s já que agora temos Realtime para agilidade
 
@@ -501,9 +510,13 @@ const selectContact = async (contact: any) => {
   pollTimer = setInterval(async () => {
     if (!activeContact.value) return
     const currentJid = activeContact.value.remote_jid
-    const msgs = await evo.fetchHistory(normalizedPhone, 20)
-    if (msgs.length > 0) {
-      await messagesStore.syncFromEvolution(currentJid, msgs)
+    try {
+      const msgs = await evo.fetchHistory(normalizedPhone, 20)
+      if (msgs.length > 0) {
+        await messagesStore.syncFromEvolution(currentJid, msgs)
+      }
+    } catch (e) {
+      console.warn('[POLLING CHAT] Falha ao buscar histórico:', e)
     }
   }, POLL_INTERVAL)
 }
