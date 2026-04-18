@@ -5,6 +5,13 @@
       <h2 class="text-xl font-semibold text-zinc-900 dark:text-white">Mensagens</h2>
       <div class="flex flex-wrap items-center gap-2">
         <button
+          @click="forceClear"
+          class="flex items-center gap-2 px-3 py-1.5 bg-red-500/10 text-red-600 dark:text-red-400 hover:bg-red-500 hover:text-white rounded-lg text-sm font-semibold transition-all"
+        >
+          <Icon name="ph:trash-bold" class="w-4 h-4" />
+          <span class="hidden xs:inline">Limpar Cache</span>
+        </button>
+        <button
           @click="syncAll"
           :disabled="syncingAll"
           class="flex items-center gap-2 px-3 py-1.5 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500 hover:text-white rounded-lg text-sm font-semibold transition-all disabled:opacity-50"
@@ -141,15 +148,12 @@ const syncAll = async () => {
     const chats = await evo.fetchChats()
     if (!chats.length) return
 
-    // Limitamos a sincronização dos últimos chats para não estoiar a API em massa
-    // Mas percorremos todos os JIDs retornados
     for (const chat of chats) {
       const jid = chat.id || chat.remoteJid
-      if (!jid || jid.includes('@g.us')) continue // Pular grupos se virem
+      if (!jid || jid.includes('@g.us')) continue 
 
       const phone = jid.split('@')[0]
       
-      // Tentar encontrar o contato no nosso store de forma rigorosa
       let contact = contactsStore.contacts.find(c => {
         const rawVal = c.phone_number || c.phone || c.whatsapp || ''
         const cPhone = String(rawVal).replace(/\D/g, '')
@@ -158,7 +162,7 @@ const syncAll = async () => {
         return cPhone === phone || 
                cPhone === '258' + phone || 
                '258' + cPhone === phone ||
-               cPhone.endsWith(phone.substring(1)) // Safe suffix match for varying DDIs
+               cPhone.endsWith(phone.substring(1))
       })
 
       if (!contact) {
@@ -172,7 +176,6 @@ const syncAll = async () => {
       }
 
       if (contact) {
-        // Buscar histórico (últimas 40 mensagens de cada)
         const history = await evo.fetchHistory(phone, 40)
         if (history && (history as any[]).length > 0) {
           await messagesStore.syncFromEvolution(phone, history)
@@ -189,19 +192,17 @@ const syncAll = async () => {
   }
 }
 
-// Search
 const showSearchModal = ref(false)
 const globalSearchQuery = ref('')
 const searchResults = ref<any[]>([])
 const searchLoading = ref(false)
 let debounceTimer: any = null
 
-// Polling
 let pollTimer: any = null
 let globalPollTimer: any = null
 let channel: any = null
 let supabase: any = null
-const POLL_INTERVAL = 4000 // 4 segundos
+const POLL_INTERVAL = 4000 
 
 onMounted(async () => {
   if (typeof window !== 'undefined') {
@@ -211,17 +212,14 @@ onMounted(async () => {
     contactsStore.fetchContacts({ is_paginate: true, per_page: 100, page: 1 })
   }
 
-  // Polling Global para novas mensagens em qualquer chat (a cada 5s)
   globalPollTimer = setInterval(async () => {
     try {
       const updatedChats = await evo.fetchChats()
       if (updatedChats?.length > 0) {
-        // Sincroniza os 15 chats mais recentes
         for (const chat of updatedChats.slice(0, 15)) {
           const phone = (chat.id || chat.remoteJid || '').split('@')[0]
           if (!phone || phone.includes('status') || phone.includes('@')) continue
 
-          // Normalização agressiva: drop prefixo 258 se existir
           const normalizePhone = (raw: string) => {
             let s = String(raw).replace(/\D/g, '')
             if (s.startsWith('258') && s.length > 9) s = s.slice(3)
@@ -230,32 +228,23 @@ onMounted(async () => {
           const chatPhone = normalizePhone(phone)
           if (chatPhone.length < 7) continue
 
-          // Matching estrito: os dois números normalizados precisam ser iguais
-          // ou um deve ser o outro com DDI na frente (ex: 258 + 841234567)
-          // Matching estrito: os dois números normalizados precisam ser iguais
-          // ou um deve ser o outro com DDI na frente (ex: 258 + 841234567)
           const matched = contactsStore.contacts.find(c => {
             const rawVal = c.phone_number || c.phone || (c as any).whatsapp || (c as any).phone_whatsapp
             if (!rawVal) return false
             const cPhone = normalizePhone(String(rawVal)).replace(/\D/g, '')
             if (cPhone.length < 7) return false
             
-            // Match estrito: evita casamentos falsos com números vazios ou curtos
             return cPhone === chatPhone || 
                    cPhone === '258' + chatPhone || 
                    '258' + cPhone === chatPhone
           })
 
-          // Se encontramos um contato oficial da Lojou, usamos o ID dele.
-          // Se não, ignoramos para não criar contatos "fantasmas" no polling global.
-          // O usuário pode criar um contato manual via "Novo Chat".
           if (!matched) continue
 
           const msgs = await evo.fetchHistory(phone, 12)
           if (msgs && (msgs as any[]).length > 0) {
             await messagesStore.syncFromEvolution(chatPhone, msgs)
             
-            // Se as mensagens novas chegarem, atualizamos a lista de "recentes" se necessário
             const isRecent = recentChats.value.some(rc => String(rc.id) === String(matched.id))
             if (!isRecent) {
                markContactAsMessaged(matched)
@@ -266,12 +255,10 @@ onMounted(async () => {
     } catch (e) {
       console.warn('[POLLING AUDIT] Falhou:', e)
     }
-  }, 10000) // Aumentado para 10s já que agora temos Realtime para agilidade
+  }, 10000) 
 
-  // SUPABASE REALTIME SUBSCRIPTION
   supabase = useSupabaseClient()
 
-  // Carregar lista inicial do Supabase
   await loadRecentChats()
 
   channel = supabase.channel('messages-realtime')
@@ -284,17 +271,13 @@ onMounted(async () => {
       const msgJid = newMsg.remote_jid
       
       if (!msgJid) return
-      console.log(`[REALTIME] Nova mensagem: ${newMsg.id} para JID: ${msgJid}`)
-
-      // 1. Atualizar histórico se for o contacto activo
+      
       if (activeContact.value?.remote_jid === msgJid) {
         await messagesStore.fetchFromSupabase(msgJid)
       }
 
-      // 2. Recarregar lista de contactos do Supabase (inclui novos leads)
       await loadRecentChats()
 
-      // 3. Notificação de Lead para mensagens recebidas (não enviadas)
       if (!newMsg.is_outgoing) {
         const { data: contact } = await supabase
           .from('contacts')
@@ -321,7 +304,6 @@ onMounted(async () => {
       schema: 'public',
       table: 'contacts'
     }, async () => {
-      // Novo contacto criado pelo webhook → actualizar lista imediatamente
       await loadRecentChats()
     })
     .subscribe()
@@ -367,14 +349,11 @@ watch(agentSignature, (val) => {
   }
 })
 
-// Lista de conversas: carrega do Supabase contacts table (não do localStorage)
-// Assim qualquer contacto criado via webhook aparece imediatamente
 const recentChats = ref<any[]>([])
 
 const loadRecentChats = async () => {
   if (!supabase) supabase = useSupabaseClient()
   
-  // 1. Tentar carregar da tabela de contatos
   const { data: contactRows } = await supabase
     .from('contacts')
     .select('*, users(*)')
@@ -383,8 +362,6 @@ const loadRecentChats = async () => {
   
   let merged: any[] = contactRows || []
 
-  // 2. Fallback/Complemento: Se não houver contatos ou poucos contatos, 
-  // buscar pelos JIDs das mensagens recentes (garante que chats "órfãos" apareçam)
   if (merged.length < 15) {
     const { data: recentMsgs } = await supabase
       .from('messages')
@@ -410,11 +387,8 @@ const loadRecentChats = async () => {
 
   if (merged.length > 0) {
     const enriched = await Promise.all(merged.map(async (c: any) => {
-      // Normalização agressiva para busca e deduplicação
       const getPhone = (j: string) => j.split('@')[0].replace(/\D/g, '').replace(/^258/, '')
       const phoneLocal = getPhone(c.remote_jid || '')
-      
-      // Padronizar JID para busca de mensagens
       const standardJid = '258' + phoneLocal + '@s.whatsapp.net'
 
       const { data: lastMsg } = await supabase
@@ -434,8 +408,6 @@ const loadRecentChats = async () => {
       }
     }))
 
-    // ── DEDUPLICAÇÃO FINAL NA SIDEBAR ────────────────────────────────
-    // Agrupar por phoneLocal e ficar com o que tiver mensagem mais recente
     const dedupedMap = new Map()
     for (const chat of enriched) {
       if (!dedupedMap.has(chat.phoneLocal) || 
@@ -455,7 +427,6 @@ const activeConversations = computed(() => {
   return recentChats.value
 })
 
-// Mensagens do contacto activo — ordenadas por JID
 const activeMessages = computed(() => {
   if (!activeContact.value) return []
   const p = activeContact.value.remote_jid || activeContact.value.phone_number || activeContact.value.phone || activeContact.value.whatsapp || ''
@@ -463,14 +434,15 @@ const activeMessages = computed(() => {
   return messagesStore.getMessagesByJid(jid)
 })
 
-// Selecciona contacto e carrega histórico
+const forceClear = () => {
+  if (confirm('Isto irá limpar o cache local e recarregar todas as conversas do banco de dados. Continuar?')) {
+    localStorage.removeItem('lojou_recent_chats_v2')
+    localStorage.removeItem('lojou_messages_cache')
+    window.location.reload()
+  }
+}
+
 const selectContact = async (contact: any) => {
-  const phoneRaw = contact.phone_number || contact.phone || contact.whatsapp
-  if (!phoneRaw) return
-
-  const normalizedPhone = String(phoneRaw).replace(/\D/g, '')
-  const jid = phoneRaw.includes('@') ? phoneRaw : `${normalizedPhone}@s.whatsapp.net`
-
   // Buscar dados completos do contacto no Supabase usando o IDENTIFICADOR ÚNICO (remoteJid)
   const { data: fullContact } = await supabase
     .from('contacts')
