@@ -125,7 +125,7 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
-import { useSupabaseClient, useHead, useRuntimeConfig } from '#imports'
+import { useSupabaseClient, useToast } from '#imports'
 import { useContactStore } from '~/stores/contacts'
 import { useMessageStore } from '~/stores/messages'
 import { useApi } from '~/composables/useApi'
@@ -141,6 +141,30 @@ const activeContact = ref<any | null>(null)
 const sending = ref(false)
 const syncingAll = ref(false)
 
+const normalizePhone = (raw: string | null | undefined) => {
+  let digits = String(raw || '').replace(/\D/g, '')
+  if (digits.startsWith('258') && digits.length > 9) {
+    digits = digits.slice(3)
+  }
+  return digits
+}
+
+const buildJid = (raw: string | null | undefined) => {
+  const digits = String(raw || '').replace(/\D/g, '')
+  if (!digits) return ''
+  const full = digits.length === 9 && digits.startsWith('8') ? `258${digits}` : digits
+  return `${full}@s.whatsapp.net`
+}
+
+const getContactPhone = (contact: any) =>
+  String(contact?.phone_number || contact?.phone || contact?.whatsapp || contact?.phone_whatsapp || '')
+
+const getContactJid = (contact: any) => {
+  const remoteJid = String(contact?.remote_jid || '')
+  if (remoteJid.includes('@')) return remoteJid
+  return buildJid(getContactPhone(contact))
+}
+
 const syncAll = async () => {
   if (syncingAll.value) return
   syncingAll.value = true
@@ -153,16 +177,13 @@ const syncAll = async () => {
       if (!jid || jid.includes('@g.us')) continue 
 
       const phone = jid.split('@')[0]
+      const normalizedPhone = normalizePhone(phone)
       
       let contact = contactsStore.contacts.find(c => {
-        const rawVal = c.phone_number || c.phone || c.whatsapp || ''
-        const cPhone = String(rawVal).replace(/\D/g, '')
-        if (cPhone.length < 7 || phone.length < 7) return false
+        const cPhone = normalizePhone(getContactPhone(c))
+        if (cPhone.length < 7 || normalizedPhone.length < 7) return false
         
-        return cPhone === phone || 
-               cPhone === '258' + phone || 
-               '258' + cPhone === phone ||
-               cPhone.endsWith(phone.substring(1))
+        return cPhone === normalizedPhone
       })
 
       if (!contact) {
@@ -178,8 +199,8 @@ const syncAll = async () => {
       if (contact) {
         const history = await evo.fetchHistory(phone, 40)
         if (history && (history as any[]).length > 0) {
-          await messagesStore.syncFromEvolution(phone, history)
-          markContactAsMessaged(contact)
+          await messagesStore.syncFromEvolution(jid, history)
+          markContactAsMessaged({ ...contact, remote_jid: jid })
         }
       }
     }
@@ -202,9 +223,17 @@ let pollTimer: any = null
 let globalPollTimer: any = null
 let channel: any = null
 let supabase: any = null
-const POLL_INTERVAL = 4000 
+const POLL_INTERVAL = 4000
+let globalPollFailCount = 0
+const GLOBAL_POLL_MAX_FAILS = 5
 
 onMounted(async () => {
+  try {
+    await $fetch('/api/lojou/sync-session', { method: 'POST' })
+  } catch (error) {
+    console.warn('[LOJOU SESSION] Falha ao sincronizar sessão para o backend:', error)
+  }
+
   if (typeof window !== 'undefined') {
     agentSignature.value = localStorage.getItem('lojou_agent_signature') || ''
   }
@@ -217,43 +246,42 @@ onMounted(async () => {
       const updatedChats = await evo.fetchChats()
       if (updatedChats?.length > 0) {
         for (const chat of updatedChats.slice(0, 15)) {
-          const phone = (chat.id || chat.remoteJid || '').split('@')[0]
-          if (!phone || phone.includes('status') || phone.includes('@')) continue
+          const jid = chat.id || chat.remoteJid || ''
+          const phone = jid.split('@')[0]
+          if (!jid || !phone || phone.includes('status') || phone.includes('@')) continue
 
-          const normalizePhone = (raw: string) => {
-            let s = String(raw).replace(/\D/g, '')
-            if (s.startsWith('258') && s.length > 9) s = s.slice(3)
-            return s
-          }
           const chatPhone = normalizePhone(phone)
           if (chatPhone.length < 7) continue
 
           const matched = contactsStore.contacts.find(c => {
-            const rawVal = c.phone_number || c.phone || (c as any).whatsapp || (c as any).phone_whatsapp
-            if (!rawVal) return false
-            const cPhone = normalizePhone(String(rawVal)).replace(/\D/g, '')
+            const cPhone = normalizePhone(getContactPhone(c))
             if (cPhone.length < 7) return false
             
-            return cPhone === chatPhone || 
-                   cPhone === '258' + chatPhone || 
-                   '258' + cPhone === chatPhone
+            return cPhone === chatPhone
           })
 
           if (!matched) continue
 
           const msgs = await evo.fetchHistory(phone, 12)
           if (msgs && (msgs as any[]).length > 0) {
-            await messagesStore.syncFromEvolution(chatPhone, msgs)
+            await messagesStore.syncFromEvolution(jid, msgs)
             
             const isRecent = recentChats.value.some(rc => String(rc.id) === String(matched.id))
             if (!isRecent) {
-               markContactAsMessaged(matched)
+               markContactAsMessaged({ ...matched, remote_jid: jid })
             }
           }
         }
       }
+      globalPollFailCount = 0
     } catch (e) {
-      console.warn('[POLLING AUDIT] Falhou:', e)
+      globalPollFailCount++
+      console.warn(`[POLLING AUDIT] Falha ${globalPollFailCount}/${GLOBAL_POLL_MAX_FAILS}:`, e)
+      if (globalPollFailCount >= GLOBAL_POLL_MAX_FAILS) {
+        console.error('[POLLING AUDIT] Polling desativado após 5 falhas consecutivas — verifique a conexão Evolution')
+        clearInterval(globalPollTimer)
+        globalPollTimer = null
+      }
     }
   }, 10000) 
 
@@ -266,13 +294,13 @@ onMounted(async () => {
       event: 'INSERT', 
       schema: 'public', 
       table: 'messages' 
-    }, async (payload) => {
+    }, async (payload: any) => {
       const newMsg = payload.new
       const msgJid = newMsg.remote_jid
       
       if (!msgJid) return
       
-      if (activeContact.value?.remote_jid === msgJid) {
+      if (activeContact.value && getContactJid(activeContact.value) === msgJid) {
         await messagesStore.fetchFromSupabase(msgJid)
       }
 
@@ -284,6 +312,8 @@ onMounted(async () => {
           .select('id, user_id, name, remote_jid, phone')
           .eq('remote_jid', msgJid)
           .maybeSingle()
+
+        if (contact?.user_id) return
 
         const toast = useToast()
         toast.add({
@@ -321,13 +351,15 @@ const markContactAsMessaged = (contact: any) => {
   if (!contact || !contact.id) return
   const current = [...recentChats.value]
   const idx = current.findIndex((c: any) => c.id == contact.id)
+  const jid = getContactJid(contact)
   
   const trimContact = {
     id: contact.id,
     name: contact.name,
     firstname: contact.firstname,
     full_name: contact.full_name,
-    phone_number: contact.phone_number || contact.phone || contact.whatsapp,
+    phone_number: getContactPhone(contact),
+    remote_jid: jid,
     email: contact.email,
     status: contact.status
   }
@@ -370,7 +402,7 @@ const loadRecentChats = async () => {
       .limit(100)
     
     if (recentMsgs) {
-      const uniqueJids = [...new Set(recentMsgs.map(m => m.remote_jid).filter(Boolean))]
+      const uniqueJids = [...new Set((recentMsgs as any[]).map((m: any) => m.remote_jid).filter(Boolean))] as string[]
       for (const jid of uniqueJids) {
         if (!merged.find(c => c.remote_jid === jid)) {
           merged.push({ 
@@ -387,9 +419,8 @@ const loadRecentChats = async () => {
 
   if (merged.length > 0) {
     const enriched = await Promise.all(merged.map(async (c: any) => {
-      const getPhone = (j: string) => j.split('@')[0].replace(/\D/g, '').replace(/^258/, '')
-      const phoneLocal = getPhone(c.remote_jid || '')
-      const standardJid = '258' + phoneLocal + '@s.whatsapp.net'
+      const standardJid = getContactJid(c) || buildJid(getContactPhone(c))
+      const phoneLocal = normalizePhone(standardJid || getContactPhone(c))
 
       const { data: lastMsg } = await supabase
         .from('messages')
@@ -403,6 +434,7 @@ const loadRecentChats = async () => {
         ...c,
         phoneLocal,
         remote_jid: standardJid,
+        name: c.users?.name || c.full_name || c.name || c.phone || standardJid.split('@')[0],
         lastMessage: lastMsg?.content || '...',
         lastMessageTime: lastMsg?.timestamp || c.created_at || new Date().toISOString()
       }
@@ -410,9 +442,9 @@ const loadRecentChats = async () => {
 
     const dedupedMap = new Map()
     for (const chat of enriched) {
-      if (!dedupedMap.has(chat.phoneLocal) || 
-          new Date(chat.lastMessageTime) > new Date(dedupedMap.get(chat.phoneLocal).lastMessageTime)) {
-        dedupedMap.set(chat.phoneLocal, chat)
+      if (!dedupedMap.has(chat.remote_jid) || 
+          new Date(chat.lastMessageTime) > new Date(dedupedMap.get(chat.remote_jid).lastMessageTime)) {
+        dedupedMap.set(chat.remote_jid, chat)
       }
     }
     
@@ -429,8 +461,7 @@ const activeConversations = computed(() => {
 
 const activeMessages = computed(() => {
   if (!activeContact.value) return []
-  const p = activeContact.value.remote_jid || activeContact.value.phone_number || activeContact.value.phone || activeContact.value.whatsapp || ''
-  const jid = p.includes('@') ? p : `${String(p).replace(/\D/g, '')}@s.whatsapp.net`
+  const jid = getContactJid(activeContact.value)
   return messagesStore.getMessagesByJid(jid)
 })
 
@@ -443,6 +474,10 @@ const forceClear = () => {
 }
 
 const selectContact = async (contact: any) => {
+  const rawPhone = getContactPhone(contact)
+  const jid = getContactJid(contact)
+  const normalizedPhone = normalizePhone(rawPhone || jid)
+  if (!jid || !normalizedPhone) return
   // Buscar dados completos do contacto no Supabase usando o IDENTIFICADOR ÚNICO (remoteJid)
   const { data: fullContact } = await supabase
     .from('contacts')
@@ -454,7 +489,7 @@ const selectContact = async (contact: any) => {
     activeContact.value = { ...contact, ...fullContact }
   } else {
     // Se não existir, garantir que temos pelo menos o JID correto para o store
-    activeContact.value = { ...contact, remote_jid: jid }
+    activeContact.value = { ...contact, remote_jid: jid, phone_number: rawPhone || normalizedPhone }
   }
 
   clearInterval(pollTimer)
@@ -472,10 +507,14 @@ const selectContact = async (contact: any) => {
   // Polling para o contacto activo
   pollTimer = setInterval(async () => {
     if (!activeContact.value) return
-    const currentJid = activeContact.value.remote_jid
-    const msgs = await evo.fetchHistory(normalizedPhone, 20)
-    if (msgs.length > 0) {
-      await messagesStore.syncFromEvolution(currentJid, msgs)
+    const currentJid = getContactJid(activeContact.value)
+    try {
+      const msgs = await evo.fetchHistory(normalizedPhone, 20)
+      if (msgs.length > 0) {
+        await messagesStore.syncFromEvolution(currentJid, msgs)
+      }
+    } catch (e) {
+      console.warn('[POLLING CHAT] Falha ao buscar histórico:', e)
     }
   }, POLL_INTERVAL)
 }
@@ -488,7 +527,7 @@ onUnmounted(() => {
 const onUserFound = async (userData: { id: string, name: string, balance: number }) => {
   if (!activeContact.value) return
 
-  const jid = activeContact.value.remote_jid
+  const jid = getContactJid(activeContact.value)
   if (!jid) return
 
   // Recarregar dados completos do contacto (agora já tem user_id)
@@ -507,7 +546,7 @@ const onUserFound = async (userData: { id: string, name: string, balance: number
 const onDeleteMessage = async (msgId: string) => {
   try {
     await evo.deleteMessage(msgId)
-    const jid = activeContact.value?.remote_jid
+    const jid = activeContact.value ? getContactJid(activeContact.value) : ''
     if (jid) {
       messagesStore.clearJid(jid) 
       await messagesStore.fetchFromSupabase(jid)
@@ -530,7 +569,7 @@ const onSendText = async (content: string, quotedId?: string) => {
 
   sending.value = true
   // ID local temporário vinculado ao JID
-  const jid = activeContact.value.remote_jid
+  const jid = getContactJid(activeContact.value)
   const localId = messagesStore.addOutgoing(jid, finalContent, 'text')
 
   try {
@@ -542,6 +581,7 @@ const onSendText = async (content: string, quotedId?: string) => {
         localId,
         messageId,
         jid,
+        contactId: activeContact.value?.id,
         content: finalContent,
         type: 'text'
       })
@@ -570,7 +610,7 @@ const onSendMedia = async (opts: {
 
   sending.value = true
 
-  const jid = activeContact.value.remote_jid
+  const jid = getContactJid(activeContact.value)
   const previewContent = opts.caption || (opts.type === 'image' ? '[Imagem]' : opts.type === 'audio' ? '[Áudio]' : '[Ficheiro]')
   const localId = messagesStore.addOutgoing(jid, previewContent, opts.type, {
     mimeType: opts.mimeType,
@@ -586,6 +626,7 @@ const onSendMedia = async (opts: {
         localId,
         messageId,
         jid,
+        contactId: activeContact.value?.id,
         content: previewContent,
         type: opts.type,
         mimeType: opts.mimeType,
@@ -658,7 +699,12 @@ const getInitials = (name: string) => {
 const startConversationWith = (user: any) => {
   showSearchModal.value = false
   globalSearchQuery.value = ''
-  selectContact(user)
+  selectContact({
+    ...user,
+    name: user.full_name || user.firstname || user.name,
+    phone_number: user.phone_number || user.phone,
+    remote_jid: buildJid(user.phone_number || user.phone)
+  })
 }
 
 const onNewChat = (phone: string) => {
@@ -667,8 +713,8 @@ const onNewChat = (phone: string) => {
 
   // Tenta encontrar um contato existente com esse telefone antes de criar um novo
   const existing = contactsStore.contacts.find(c => {
-    const cPhone = String(c.phone_number || c.phone || (c as any).whatsapp || '').replace(/\D/g, '')
-    return cPhone === cleanPhone || cPhone.endsWith(cleanPhone) || cleanPhone.endsWith(cPhone)
+    const cPhone = normalizePhone(String(c.phone_number || c.phone || (c as any).whatsapp || ''))
+    return cPhone === normalizePhone(cleanPhone)
   })
 
   if (existing) {
@@ -681,7 +727,8 @@ const onNewChat = (phone: string) => {
     phone_number: phone,
     name: phone,
     full_name: phone,
-    status: 'active'
+    status: 'active',
+    remote_jid: buildJid(phone)
   }
   contactsStore.contacts.unshift(newContact as any)
   selectContact(newContact)

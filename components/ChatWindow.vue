@@ -36,6 +36,8 @@
             <span class="text-sm font-black text-emerald-600 dark:text-emerald-400">
               {{ (contact.users.balance || 0).toLocaleString('pt-PT', { style: 'currency', currency: 'MZN' }) }}
             </span>
+            <span class="text-[10px] text-zinc-400 mt-1">ID {{ contact.users.id || contact.user_id }}</span>
+            <span class="text-[10px] uppercase tracking-wider text-zinc-500">{{ contact.users.status || 'active' }}</span>
           </div>
           <div class="flex items-center gap-2">
             <span v-if="hasEvolution" class="w-2.5 h-2.5 bg-emerald-500 rounded-full animate-pulse tooltip-trigger" title="Conexão Evolution Ativa"></span>
@@ -45,7 +47,7 @@
       </div>
 
       <!-- Lead Alert Banner -->
-      <div v-if="!contact.users" class="px-4 py-2.5 bg-gradient-to-r from-amber-500/10 via-amber-500/5 to-transparent border-b border-amber-500/20 flex items-center justify-between shrink-0">
+      <div v-if="!contact.users && !leadIgnored" class="px-4 py-2.5 bg-gradient-to-r from-amber-500/10 via-amber-500/5 to-transparent border-b border-amber-500/20 flex items-center justify-between shrink-0">
         <div class="flex items-center gap-3">
           <div class="w-8 h-8 rounded-lg bg-amber-500/10 flex items-center justify-center text-amber-600">
             <Icon v-if="!lojouChecking" name="ph:user-plus-bold" class="w-5 h-5" />
@@ -59,6 +61,14 @@
           </div>
         </div>
         <div class="flex gap-2">
+          <UButton 
+            size="2xs" 
+            color="emerald" 
+            variant="soft" 
+            label="Criar usuário" 
+            icon="i-heroicons-user-plus"
+            @click="openCreateUser"
+          />
           <UButton 
             size="2xs" 
             color="amber" 
@@ -104,7 +114,7 @@
               <!-- Conteúdo da Mensagem -->
               <div class="message-content-wrapper relative group">
                 <!-- Áudio -->
-                <div v-if="msg.type === 'audio' || msg.type === 'ptt'" class="px-3 py-3 flex flex-col gap-1.5 min-w-[240px]">
+                <div v-if="msg.type === 'audio'" class="px-3 py-3 flex flex-col gap-1.5 min-w-[240px]">
                   <div class="flex items-center gap-3">
                      <div class="w-8 h-8 rounded-full bg-white/20 flex items-center justify-center shrink-0">
                         <Icon name="ph:microphone-fill" class="w-4 h-4" />
@@ -124,7 +134,7 @@
                   <img 
                     :src="msg.mediaUrl || (msg.mediaBase64 ? 'data:' + msg.mimeType + ';base64,' + msg.mediaBase64 : '')" 
                     class="rounded-lg max-w-full max-h-64 cursor-pointer hover:opacity-90 transition"
-                    @click="$emit('preview', msg)"
+                    @click="lightboxSrc = mediaSource(msg)"
                   />
                   <div v-if="msg.caption" class="px-3 py-2 text-sm">{{ msg.caption }}</div>
                   <div class="px-3 pb-1.5 flex justify-end items-center gap-1.5 text-[10px] opacity-70">
@@ -291,7 +301,9 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, nextTick, watch, defineComponent, h, resolveComponent } from 'vue'
+import { ref, computed, nextTick, watch, defineComponent, h, resolveComponent, onMounted } from 'vue'
+import { useToast } from '#imports'
+import { useEvolution } from '~/composables/useEvolution'
 import type { Message } from '~/stores/messages'
 
 // Sub-component inline para ícone de status
@@ -319,6 +331,7 @@ const emit = defineEmits<{
   (e: 'delete-message', msgId: string): void
   (e: 'back'): void
   (e: 'user-found', userData: { id: string, name: string, balance: number }): void
+  (e: 'preview', msg: Message): void
 }>()
 
 const newMessage = ref('')
@@ -345,7 +358,10 @@ const checkLojou = async () => {
   try {
     const res = await $fetch<any>('/api/lojou/check-user', {
       method: 'POST',
-      body: { phone: cleanPhone }
+      body: {
+        phone: cleanPhone,
+        remoteJid: props.contact?.remote_jid || null
+      }
     })
 
     if (res.found && res.user) {
@@ -356,6 +372,7 @@ const checkLojou = async () => {
         icon: 'i-heroicons-check-circle',
         timeout: 5000
       })
+      leadIgnored.value = false
       emit('user-found', res.user)
     } else {
       toast.add({
@@ -377,6 +394,26 @@ const checkLojou = async () => {
   } finally {
     lojouChecking.value = false
   }
+}
+
+const openCreateUser = async () => {
+  const phone = contactPhone.value
+  if (!phone) return
+
+  try {
+    await navigator.clipboard.writeText(String(phone))
+  } catch {
+    // Clipboard can fail silently depending on browser permission.
+  }
+
+  window.open('https://web.lojou.app', '_blank', 'noopener,noreferrer')
+  toast.add({
+    title: 'Abrir cadastro da Lojou',
+    description: `O número ${phone} foi copiado para facilitar o cadastro manual.`,
+    color: 'emerald',
+    icon: 'i-heroicons-arrow-top-right-on-square',
+    timeout: 5000
+  })
 }
 
 // Auto-verificar na Lojou quando se abre um contacto Lead (sem user_id)

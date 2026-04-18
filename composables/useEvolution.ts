@@ -1,4 +1,5 @@
 import axios from 'axios'
+import { useSupabaseClient } from '#imports'
 
 export interface EvoMessage {
   evoId: string
@@ -32,25 +33,25 @@ export const useEvolution = () => {
   }
 
   const fetchSettings = async () => {
-    const { data, error } = await clientSupabase
+    const { data, error } = await (clientSupabase
       .from('settings')
       .select('value')
       .eq('key', 'evolution_config')
-      .maybeSingle()
+      .maybeSingle() as any)
     
     if (error || !data) return null
-    return data.value as { url: string; key: string; instance: string }
+    return (data as any).value as { url: string; key: string; instance: string }
   }
 
   const saveSettings = async (url: string, key: string, instance: string) => {
     const value = { url, key, instance }
-    const { error } = await clientSupabase
+    const { error } = await ((clientSupabase as any)
       .from('settings')
       .upsert({ 
         key: 'evolution_config', 
         value, 
         updated_at: new Date().toISOString() 
-      }, { onConflict: 'key' })
+      }, { onConflict: 'key' }))
     
     if (error) throw error
     
@@ -281,7 +282,7 @@ export const useEvolution = () => {
     const res = await c.http.post(`/instance/setWebhook/${c.instance}`, {
       url: webhookUrl,
       enabled: true,
-      events: ['MESSAGES_UPSERT', 'MESSAGES_UPDATE', 'SEND_MESSAGE']
+      events: ['MESSAGES_UPSERT', 'MESSAGES_UPDATE', 'MESSAGES_SET', 'SEND_MESSAGE']
     })
     return res.data
   }

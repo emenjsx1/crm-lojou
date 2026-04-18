@@ -11,6 +11,7 @@ export interface Message {
   timestamp: string
   is_outgoing: boolean
   type: 'text' | 'image' | 'audio' | 'video' | 'document'
+  mediaBase64?: string
   mediaUrl?: string
   mimeType?: string
   caption?: string
@@ -68,6 +69,18 @@ export const useMessageStore = defineStore('messages', {
       }
     },
 
+    updateStatus(id: string, status: Message['status']) {
+      if (!id) return
+
+      for (const jid of Object.keys(this.messagesByJid)) {
+        const found = this.messagesByJid[jid]?.find(message => message.id === id)
+        if (found) {
+          found.status = status
+          return
+        }
+      }
+    },
+
     addOutgoing(
       jid: string,
       content: string,
@@ -92,6 +105,7 @@ export const useMessageStore = defineStore('messages', {
       localId: string,
       messageId: string,
       jid: string,
+      contactId?: string,
       content: string,
       type: Message['type'],
       mediaUrl?: string,
@@ -111,6 +125,7 @@ export const useMessageStore = defineStore('messages', {
       const payload = {
         id: params.messageId, // ID unificado
         message_id: params.messageId,
+        contact_id: params.contactId,
         remote_jid: params.jid,
         content: params.content,
         type: params.type,
@@ -124,7 +139,7 @@ export const useMessageStore = defineStore('messages', {
       }
 
       try {
-        await client.from('messages').upsert(payload, { onConflict: 'message_id' })
+        await (client.from('messages').upsert(payload as any, { onConflict: 'message_id' }) as any)
       } catch (e) {
         console.error('[STORE] Erro ao persistir mensagem enviada:', e)
       }
@@ -132,6 +147,13 @@ export const useMessageStore = defineStore('messages', {
 
     async syncFromEvolution(jid: string, evoMessages: EvoMessage[]) {
       const client = useSupabaseClient()
+      const { data: contactRow } = await (client
+        .from('contacts')
+        .select('id')
+        .eq('remote_jid', jid)
+        .maybeSingle() as any)
+
+      const contactId = contactRow?.id || undefined
       const toUpsert: any[] = []
 
       for (const em of evoMessages) {
@@ -153,12 +175,14 @@ export const useMessageStore = defineStore('messages', {
 
         const msgObj: Message = {
           id: em.evoId,
+          contact_id: contactId,
           remote_jid: jid,
           content: em.content,
           status: EVO_STATUS_MAP[em.status] || 'delivered',
           timestamp: new Date(em.timestamp).toISOString(),
           is_outgoing: em.fromMe,
           type: em.type,
+          mediaBase64: em.mediaBase64,
           mediaUrl: em.mediaUrl,
           mimeType: em.mimeType,
           caption: em.caption
@@ -169,6 +193,7 @@ export const useMessageStore = defineStore('messages', {
         toUpsert.push({
           id: em.evoId,
           message_id: em.evoId,
+          contact_id: contactId,
           remote_jid: jid,
           content: em.content || '',
           type: em.type,
@@ -185,7 +210,7 @@ export const useMessageStore = defineStore('messages', {
       if (toUpsert.length > 0) {
         try {
           // Usamos upsert por message_id para garantir que não duplicamos se o JID mudar
-          await client.from('messages').upsert(toUpsert, { onConflict: 'message_id' })
+          await (client.from('messages').upsert(toUpsert as any, { onConflict: 'message_id' }) as any)
         } catch (e) {
           console.error('[DATABASE] Falha no sync evolution:', e)
         }
@@ -196,17 +221,17 @@ export const useMessageStore = defineStore('messages', {
       if (!jid) return
       const client = useSupabaseClient()
 
-      const { data, error } = await client.from('messages')
+      const { data, error } = await (client.from('messages')
         .select('*')
         .eq('remote_jid', jid)
-        .order('timestamp', { ascending: true })
+        .order('timestamp', { ascending: true }) as any)
 
       if (error) {
         console.error('[STORE] Erro ao buscar mensagens por JID:', error)
         return
       }
 
-      (data || []).forEach(m => {
+      ((data as any[]) || []).forEach((m: any) => {
         this.upsertIntoStore({
           id: m.message_id || m.id,
           contact_id: m.contact_id,
@@ -228,4 +253,3 @@ export const useMessageStore = defineStore('messages', {
     }
   }
 })
-
