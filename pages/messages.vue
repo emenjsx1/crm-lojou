@@ -116,6 +116,7 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
+import { useSupabaseClient } from '#imports'
 import { useContactStore } from '~/stores/contacts'
 import { useMessageStore } from '~/stores/messages'
 import { useApi } from '~/composables/useApi'
@@ -133,6 +134,7 @@ const sending = ref(false)
 const chats = ref<any[]>([])                  // lista de conversas (Evolution)
 let pollTimer: any = null                       // polling do chat activo
 let chatsPollTimer: any = null                  // polling da lista de chats
+let realtimeChannel: any = null                 // Supabase Realtime
 
 // Search modal
 const showSearchModal = ref(false)
@@ -159,20 +161,43 @@ const getContactJid = (contact: any): string => {
 const getContactPhone = (contact: any): string =>
   String(contact?.phone_number || contact?.phone || contact?.whatsapp || '')
 
+// ── Normalizar phone para match (remove DDI 258) ─────────────────────────────
+const normalizePhone = (raw: string) => String(raw || '').replace(/\D/g, '').replace(/^258/, '')
+
+// ── Match com Lojou: retorna o utilizador Lojou ou null ─────────────────────
+const findLojouUser = (jidPhone: string) => {
+  const local = normalizePhone(jidPhone) // ex: "855253617"
+  return contactsStore.contacts.find((c: any) => {
+    const cp = normalizePhone(String(c.phone_number || c.mobile_number || ''))
+    return cp && cp === local
+  }) || null
+}
+
 // ── Carregar chats da Evolution directamente ─────────────────────────────────
 const loadChats = async () => {
   try {
     const evoChats = await evo.fetchChats()
     if (evoChats.length > 0) {
-      chats.value = evoChats.map(c => ({
-        id: c.id,
-        remote_jid: c.id,
-        name: c.name || c.id.split('@')[0],
-        phone_number: c.id.split('@')[0],
-        lastMessage: c.lastMessage || '',
-        lastMessageTime: c.lastTimestamp ? new Date(c.lastTimestamp).toISOString() : new Date().toISOString(),
-        unreadCount: c.unreadCount || 0
-      }))
+      chats.value = evoChats.map(c => {
+        const phone = c.id.split('@')[0]
+        const lojou = findLojouUser(phone)
+        return {
+          id: c.id,
+          remote_jid: c.id,
+          // Nome: preferência: Lojou > WhatsApp pushName > número
+          name: lojou
+            ? (lojou.full_name || lojou.firstname || lojou.name)
+            : (c.name || phone),
+          phone_number: phone,
+          lastMessage: c.lastMessage || '',
+          lastMessageTime: c.lastTimestamp ? new Date(c.lastTimestamp).toISOString() : new Date().toISOString(),
+          unreadCount: c.unreadCount || 0,
+          // Dados Lojou para o ChatWindow
+          user_id: lojou?.id || null,
+          lojou_status: lojou?.status || null,
+          lojou_balance: lojou?.balance || null
+        }
+      })
     }
   } catch (e) {
     console.warn('[CHATS] Falha ao carregar chats da Evolution:', e)
@@ -310,27 +335,63 @@ onMounted(async () => {
     agentSignature.value = localStorage.getItem('lojou_agent_signature') || ''
   }
 
-  // Carregar chats da Evolution
+  // 1. Carregar contactos Lojou primeiro (necessário para o match na sidebar)
+  if (contactsStore.contacts.length === 0) {
+    await contactsStore.fetchContacts({ is_paginate: true, per_page: 500, page: 1 })
+  }
+
+  // 2. Carregar chats da Evolution (agora com match Lojou)
   await loadChats()
 
-  // Polling da lista de chats a cada 10s
+  // 3. Polling da lista de chats a cada 15s
   chatsPollTimer = setInterval(async () => {
-    try {
-      await loadChats()
-    } catch (e) {
-      console.warn('[CHATS POLL] Erro:', e)
-    }
-  }, 10000)
+    try { await loadChats() } catch (e) { console.warn('[CHATS POLL]', e) }
+  }, 15000)
 
-  // Carregar contactos Lojou (para o search modal)
-  if (contactsStore.contacts.length === 0) {
-    contactsStore.fetchContacts({ is_paginate: true, per_page: 100, page: 1 })
-  }
+  // 4. Supabase Realtime — recebe mensagens em tempo real via webhook
+  const supabase = useSupabaseClient()
+  realtimeChannel = supabase
+    .channel('messages-rt')
+    .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages' }, (payload: any) => {
+      const m = payload.new
+      if (!m?.remote_jid || !m?.id) return
+
+      const jid = m.remote_jid
+
+      // Adicionar ao store in-memory
+      messagesStore.upsertIntoStore({
+        id: m.message_id || m.id,
+        remote_jid: jid,
+        content: m.content || '',
+        status: m.status || 'delivered',
+        timestamp: m.timestamp || new Date().toISOString(),
+        is_outgoing: Boolean(m.is_outgoing),
+        type: m.type || 'text',
+        mediaUrl: m.media_url,
+        mimeType: m.mime_type,
+        caption: m.caption
+      })
+
+      // Actualizar última mensagem da sidebar
+      const chatIdx = chats.value.findIndex(c => c.remote_jid === jid)
+      if (chatIdx >= 0) {
+        chats.value[chatIdx].lastMessage = m.content || ''
+        chats.value[chatIdx].lastMessageTime = m.timestamp || new Date().toISOString()
+        // Mover para o topo
+        const updated = chats.value.splice(chatIdx, 1)[0]
+        chats.value.unshift(updated)
+      } else {
+        // Chat novo — recarregar lista
+        loadChats()
+      }
+    })
+    .subscribe()
 })
 
 onUnmounted(() => {
   clearInterval(pollTimer)
   clearInterval(chatsPollTimer)
+  if (realtimeChannel) realtimeChannel.unsubscribe()
 })
 
 // ── Search Modal ──────────────────────────────────────────────────────────────
