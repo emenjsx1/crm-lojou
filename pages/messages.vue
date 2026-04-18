@@ -5,20 +5,11 @@
       <h2 class="text-xl font-semibold text-zinc-900 dark:text-white">Mensagens</h2>
       <div class="flex flex-wrap items-center gap-2">
         <button
-          @click="forceClear"
-          class="flex items-center gap-2 px-3 py-1.5 bg-red-500/10 text-red-600 dark:text-red-400 hover:bg-red-500 hover:text-white rounded-lg text-sm font-semibold transition-all"
+          @click="refreshChats"
+          class="flex items-center gap-2 px-3 py-1.5 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500 hover:text-white rounded-lg text-sm font-semibold transition-all"
         >
-          <Icon name="ph:trash-bold" class="w-4 h-4" />
-          <span class="hidden xs:inline">Limpar Cache</span>
-        </button>
-        <button
-          @click="syncAll"
-          :disabled="syncingAll"
-          class="flex items-center gap-2 px-3 py-1.5 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500 hover:text-white rounded-lg text-sm font-semibold transition-all disabled:opacity-50"
-        >
-          <Icon :name="syncingAll ? 'ph:spinner-gap-bold' : 'ph:arrows-clockwise-bold'" class="w-4 h-4" :class="{ 'animate-spin': syncingAll }" />
-          <span class="hidden xs:inline">{{ syncingAll ? 'A sincronizar...' : 'Sincronizar Tudo' }}</span>
-          <span class="xs:hidden">{{ syncingAll ? '...' : 'Sync' }}</span>
+          <Icon name="ph:arrows-clockwise-bold" class="w-4 h-4" />
+          <span class="hidden xs:inline">Actualizar</span>
         </button>
         <label class="hidden sm:inline text-sm font-medium text-zinc-600 dark:text-zinc-400 shrink-0">Assinatura:</label>
         <div class="relative flex-1 min-w-[140px]">
@@ -125,7 +116,6 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
-import { useSupabaseClient, useToast } from '#imports'
 import { useContactStore } from '~/stores/contacts'
 import { useMessageStore } from '~/stores/messages'
 import { useApi } from '~/composables/useApi'
@@ -136,329 +126,99 @@ const messagesStore = useMessageStore()
 const { api } = useApi()
 const evo = useEvolution()
 
+// ── Estado ───────────────────────────────────────────────────────────────────
 const agentSignature = ref('')
 const activeContact = ref<any | null>(null)
 const sending = ref(false)
-const syncingAll = ref(false)
+const chats = ref<any[]>([])                  // lista de conversas (Evolution)
+let pollTimer: any = null                       // polling do chat activo
+let chatsPollTimer: any = null                  // polling da lista de chats
 
-const normalizePhone = (raw: string | null | undefined) => {
-  let digits = String(raw || '').replace(/\D/g, '')
-  if (digits.startsWith('258') && digits.length > 9) {
-    digits = digits.slice(3)
-  }
-  return digits
-}
-
-const buildJid = (raw: string | null | undefined) => {
-  const digits = String(raw || '').replace(/\D/g, '')
-  if (!digits) return ''
-  const full = digits.length === 9 && digits.startsWith('8') ? `258${digits}` : digits
-  return `${full}@s.whatsapp.net`
-}
-
-const getContactPhone = (contact: any) =>
-  String(contact?.phone_number || contact?.phone || contact?.whatsapp || contact?.phone_whatsapp || '')
-
-const getContactJid = (contact: any) => {
-  const remoteJid = String(contact?.remote_jid || '')
-  if (remoteJid.includes('@')) return remoteJid
-  return buildJid(getContactPhone(contact))
-}
-
-const syncAll = async () => {
-  if (syncingAll.value) return
-  syncingAll.value = true
-  try {
-    const chats = await evo.fetchChats()
-    if (!chats.length) return
-
-    for (const chat of chats) {
-      const jid = chat.id || chat.remoteJid
-      if (!jid || jid.includes('@g.us')) continue 
-
-      const phone = jid.split('@')[0]
-      const normalizedPhone = normalizePhone(phone)
-      
-      let contact = contactsStore.contacts.find(c => {
-        const cPhone = normalizePhone(getContactPhone(c))
-        if (cPhone.length < 7 || normalizedPhone.length < 7) return false
-        
-        return cPhone === normalizedPhone
-      })
-
-      if (!contact) {
-        contact = {
-          id: 'ext_' + phone,
-          phone_number: phone,
-          name: chat.name || phone,
-          full_name: chat.name || phone,
-          email: ''
-        }
-      }
-
-      if (contact) {
-        const history = await evo.fetchHistory(phone, 40)
-        if (history && (history as any[]).length > 0) {
-          await messagesStore.syncFromEvolution(jid, history)
-          markContactAsMessaged({ ...contact, remote_jid: jid })
-        }
-      }
-    }
-    alert('Sincronização concluída com sucesso!')
-  } catch (err) {
-    console.error('[SYNC ALL]', err)
-    alert('Erro durante a sincronização parcial.')
-  } finally {
-    syncingAll.value = false
-  }
-}
-
+// Search modal
 const showSearchModal = ref(false)
 const globalSearchQuery = ref('')
 const searchResults = ref<any[]>([])
 const searchLoading = ref(false)
 let debounceTimer: any = null
 
-let pollTimer: any = null
-let globalPollTimer: any = null
-let channel: any = null
-let supabase: any = null
-const POLL_INTERVAL = 4000
-let globalPollFailCount = 0
-const GLOBAL_POLL_MAX_FAILS = 5
+// ── Helpers ───────────────────────────────────────────────────────────────────
+const buildJid = (raw: string | null | undefined): string => {
+  const digits = String(raw || '').replace(/\D/g, '')
+  if (!digits) return ''
+  const full = digits.length === 9 && digits.startsWith('8') ? `258${digits}` : digits
+  return `${full}@s.whatsapp.net`
+}
 
-onMounted(async () => {
+const getContactJid = (contact: any): string => {
+  const jid = String(contact?.remote_jid || '')
+  if (jid.includes('@')) return jid
+  const phone = String(contact?.phone_number || contact?.phone || contact?.whatsapp || '')
+  return buildJid(phone)
+}
+
+const getContactPhone = (contact: any): string =>
+  String(contact?.phone_number || contact?.phone || contact?.whatsapp || '')
+
+// ── Carregar chats da Evolution directamente ─────────────────────────────────
+const loadChats = async () => {
   try {
-    await $fetch('/api/lojou/sync-session', { method: 'POST' })
-  } catch (error) {
-    console.warn('[LOJOU SESSION] Falha ao sincronizar sessão para o backend:', error)
-  }
-
-  if (typeof window !== 'undefined') {
-    agentSignature.value = localStorage.getItem('lojou_agent_signature') || ''
-  }
-  if (contactsStore.contacts.length === 0) {
-    contactsStore.fetchContacts({ is_paginate: true, per_page: 100, page: 1 })
-  }
-
-  globalPollTimer = setInterval(async () => {
-    try {
-      const updatedChats = await evo.fetchChats()
-      if (updatedChats?.length > 0) {
-        for (const chat of updatedChats.slice(0, 15)) {
-          const jid = chat.id || chat.remoteJid || ''
-          const phone = jid.split('@')[0]
-          if (!jid || !phone || phone.includes('status') || phone.includes('@')) continue
-
-          const chatPhone = normalizePhone(phone)
-          if (chatPhone.length < 7) continue
-
-          const matched = contactsStore.contacts.find(c => {
-            const cPhone = normalizePhone(getContactPhone(c))
-            if (cPhone.length < 7) return false
-            
-            return cPhone === chatPhone
-          })
-
-          if (!matched) continue
-
-          const msgs = await evo.fetchHistory(phone, 12)
-          if (msgs && (msgs as any[]).length > 0) {
-            await messagesStore.syncFromEvolution(jid, msgs)
-            
-            const isRecent = recentChats.value.some(rc => String(rc.id) === String(matched.id))
-            if (!isRecent) {
-               markContactAsMessaged({ ...matched, remote_jid: jid })
-            }
-          }
-        }
-      }
-      globalPollFailCount = 0
-    } catch (e) {
-      globalPollFailCount++
-      console.warn(`[POLLING AUDIT] Falha ${globalPollFailCount}/${GLOBAL_POLL_MAX_FAILS}:`, e)
-      if (globalPollFailCount >= GLOBAL_POLL_MAX_FAILS) {
-        console.error('[POLLING AUDIT] Polling desativado após 5 falhas consecutivas — verifique a conexão Evolution')
-        clearInterval(globalPollTimer)
-        globalPollTimer = null
-      }
+    const evoChats = await evo.fetchChats()
+    if (evoChats.length > 0) {
+      chats.value = evoChats.map(c => ({
+        id: c.id,
+        remote_jid: c.id,
+        name: c.name || c.id.split('@')[0],
+        phone_number: c.id.split('@')[0],
+        lastMessage: c.lastMessage || '',
+        lastMessageTime: c.lastTimestamp ? new Date(c.lastTimestamp).toISOString() : new Date().toISOString(),
+        unreadCount: c.unreadCount || 0
+      }))
     }
-  }, 10000) 
+  } catch (e) {
+    console.warn('[CHATS] Falha ao carregar chats da Evolution:', e)
+  }
+}
 
-  supabase = useSupabaseClient()
+const refreshChats = () => loadChats()
 
-  await loadRecentChats()
-
-  channel = supabase.channel('messages-realtime')
-    .on('postgres_changes', { 
-      event: 'INSERT', 
-      schema: 'public', 
-      table: 'messages' 
-    }, async (payload: any) => {
-      const newMsg = payload.new
-      const msgJid = newMsg.remote_jid
-      
-      if (!msgJid) return
-      
-      if (activeContact.value && getContactJid(activeContact.value) === msgJid) {
-        await messagesStore.fetchFromSupabase(msgJid)
-      }
-
-      await loadRecentChats()
-
-      if (!newMsg.is_outgoing) {
-        const { data: contact } = await supabase
-          .from('contacts')
-          .select('id, user_id, name, remote_jid, phone')
-          .eq('remote_jid', msgJid)
-          .maybeSingle()
-
-        if (contact?.user_id) return
-
-        const toast = useToast()
-        toast.add({
-          title: contact?.user_id ? '💬 Nova Mensagem' : '🆕 Novo Lead!',
-          description: `Mensagem de ${contact?.name || msgJid.split('@')[0]}`,
-          icon: contact?.user_id ? 'i-heroicons-chat-bubble-left' : 'i-heroicons-user-plus',
-          color: contact?.user_id ? 'emerald' : 'amber',
-          timeout: 6000,
-          actions: [{
-            label: 'Atender',
-            click: () => contact ? selectContact(contact) : onNewChat(msgJid.split('@')[0])
-          }]
-        })
-      }
-    })
-    .on('postgres_changes', {
-      event: 'INSERT',
-      schema: 'public',
-      table: 'contacts'
-    }, async () => {
-      await loadRecentChats()
-    })
-    .subscribe()
-})
-
-onUnmounted(() => {
+// ── Seleccionar contacto e carregar histórico ────────────────────────────────
+const selectContact = async (contact: any) => {
   clearInterval(pollTimer)
-  clearInterval(globalPollTimer)
-  if (channel) {
-    channel.unsubscribe()
-  }
-})
+  activeContact.value = contact
 
-const markContactAsMessaged = (contact: any) => {
-  if (!contact || !contact.id) return
-  const current = [...recentChats.value]
-  const idx = current.findIndex((c: any) => c.id == contact.id)
   const jid = getContactJid(contact)
-  
-  const trimContact = {
-    id: contact.id,
-    name: contact.name,
-    firstname: contact.firstname,
-    full_name: contact.full_name,
-    phone_number: getContactPhone(contact),
-    remote_jid: jid,
-    email: contact.email,
-    status: contact.status
+  if (!jid) return
+
+  // Limpar mensagens anteriores e carregar do Evolution
+  messagesStore.clearJid(jid)
+
+  const phone = jid.split('@')[0]
+  try {
+    const msgs = await evo.fetchHistory(jid, 60)
+    if (msgs.length > 0) {
+      messagesStore.loadFromEvolution(jid, msgs)
+    }
+  } catch (e) {
+    console.warn('[SELECT] Erro ao carregar histórico:', e)
   }
 
-  if (idx === -1) {
-    current.unshift(trimContact)
-  } else {
-    current.splice(idx, 1)
-    current.unshift(trimContact)
-  }
-  
-  localStorage.setItem('lojou_recent_chats_v2', JSON.stringify(current))
-  recentChats.value = current
+  // Polling do chat activo (a cada 4s)
+  pollTimer = setInterval(async () => {
+    if (!activeContact.value) return
+    const currentJid = getContactJid(activeContact.value)
+    try {
+      const msgs = await evo.fetchHistory(currentJid, 30)
+      if (msgs.length > 0) {
+        messagesStore.loadFromEvolution(currentJid, msgs)
+      }
+    } catch (e) {
+      console.warn('[POLL CHAT] Erro:', e)
+    }
+  }, 4000)
 }
 
-watch(agentSignature, (val) => {
-  if (typeof window !== 'undefined') {
-    localStorage.setItem('lojou_agent_signature', val)
-  }
-})
-
-const recentChats = ref<any[]>([])
-
-const loadRecentChats = async () => {
-  if (!supabase) supabase = useSupabaseClient()
-
-  // Buscar contactos + última mensagem de cada JID num único query
-  const { data: contactRows } = await supabase
-    .from('contacts')
-    .select('*, users(*)')
-    .order('created_at', { ascending: false })
-    .limit(100)
-
-  // Buscar JIDs com mensagens (para garantir que novos contactos aparecem)
-  const { data: recentMsgs } = await supabase
-    .from('messages')
-    .select('remote_jid, content, timestamp, is_outgoing')
-    .order('timestamp', { ascending: false })
-    .limit(200)
-
-  // Construir mapa de última mensagem por JID
-  const lastMsgByJid = new Map<string, any>()
-  for (const m of (recentMsgs || [])) {
-    if (!m.remote_jid) continue
-    const jidKey = normalizePhone(m.remote_jid.split('@')[0])
-    if (!lastMsgByJid.has(jidKey)) {
-      lastMsgByJid.set(jidKey, m)
-    }
-  }
-
-  // Mapa phoneLocal → chat (deduplicação por número normalizado)
-  // Evita que 855253617 e 258855253617 apareçam duas vezes
-  const dedupedMap = new Map<string, any>()
-
-  // 1. Processar contactos do Supabase
-  for (const c of (contactRows || [])) {
-    const jid = getContactJid(c)
-    if (!jid) continue
-    const phoneKey = normalizePhone(jid.split('@')[0])
-    const lastMsg = lastMsgByJid.get(phoneKey)
-    const entry = {
-      ...c,
-      phoneLocal: phoneKey,
-      remote_jid: jid,
-      name: c.users?.name || c.full_name || c.name || c.phone || jid.split('@')[0],
-      lastMessage: lastMsg?.content || null,
-      lastMessageTime: lastMsg?.timestamp || c.created_at || new Date().toISOString()
-    }
-    // Ficar com a entrada que tem mensagem mais recente
-    if (!dedupedMap.has(phoneKey) ||
-        new Date(entry.lastMessageTime) > new Date(dedupedMap.get(phoneKey).lastMessageTime)) {
-      dedupedMap.set(phoneKey, entry)
-    }
-  }
-
-  // 2. Adicionar JIDs com mensagens que não têm contacto criado (novos leads)
-  for (const [phoneKey, msg] of lastMsgByJid) {
-    if (dedupedMap.has(phoneKey)) continue
-    const jid = msg.remote_jid
-    dedupedMap.set(phoneKey, {
-      id: 'orphan_' + jid,
-      phoneLocal: phoneKey,
-      remote_jid: jid,
-      phone: jid.split('@')[0],
-      name: jid.split('@')[0],
-      lastMessage: msg.content || null,
-      lastMessageTime: msg.timestamp || new Date().toISOString()
-    })
-  }
-
-  recentChats.value = Array.from(dedupedMap.values()).sort(
-    (a, b) => new Date(b.lastMessageTime).getTime() - new Date(a.lastMessageTime).getTime()
-  )
-}
-
-const activeConversations = computed(() => {
-  if (!recentChats.value) return []
-  return recentChats.value
-})
+// ── Computed ──────────────────────────────────────────────────────────────────
+const activeConversations = computed(() => chats.value)
 
 const activeMessages = computed(() => {
   if (!activeContact.value) return []
@@ -466,137 +226,33 @@ const activeMessages = computed(() => {
   return messagesStore.getMessagesByJid(jid)
 })
 
-const forceClear = () => {
-  if (confirm('Isto irá limpar o cache local e recarregar todas as conversas do banco de dados. Continuar?')) {
-    localStorage.removeItem('lojou_recent_chats_v2')
-    localStorage.removeItem('lojou_messages_cache')
-    window.location.reload()
-  }
-}
-
-const selectContact = async (contact: any) => {
-  const rawPhone = getContactPhone(contact)
-  const jid = getContactJid(contact)
-  const normalizedPhone = normalizePhone(rawPhone || jid)
-  if (!jid || !normalizedPhone) return
-  // Buscar dados completos do contacto no Supabase usando o IDENTIFICADOR ÚNICO (remoteJid)
-  const { data: fullContact } = await supabase
-    .from('contacts')
-    .select('*, users(*)')
-    .eq('remote_jid', jid)
-    .maybeSingle()
-
-  if (fullContact) {
-    activeContact.value = { ...contact, ...fullContact }
-  } else {
-    // Se não existir, garantir que temos pelo menos o JID correto para o store
-    activeContact.value = { ...contact, remote_jid: jid, phone_number: rawPhone || normalizedPhone }
-  }
-
-  clearInterval(pollTimer)
-
-  // Primeiro carrega o que já temos no Supabase (offline/cache)
-  await messagesStore.fetchFromSupabase(jid)
-
-  // Depois sincroniza o histórico mais recente da Evolution
-  const history = await evo.fetchHistory(normalizedPhone)
-  if (history.length > 0) {
-    await messagesStore.syncFromEvolution(jid, history)
-    markContactAsMessaged(activeContact.value)
-  }
-
-  // Polling para o contacto activo
-  pollTimer = setInterval(async () => {
-    if (!activeContact.value) return
-    const currentJid = getContactJid(activeContact.value)
-    try {
-      const msgs = await evo.fetchHistory(normalizedPhone, 20)
-      if (msgs.length > 0) {
-        await messagesStore.syncFromEvolution(currentJid, msgs)
-      }
-    } catch (e) {
-      console.warn('[POLLING CHAT] Falha ao buscar histórico:', e)
-    }
-  }, POLL_INTERVAL)
-}
-
-onUnmounted(() => {
-  clearInterval(pollTimer)
-})
-
-// Quando o ChatWindow identifica o utilizador na Lojou, actualiza o contacto activo
-const onUserFound = async (userData: { id: string, name: string, balance: number }) => {
-  if (!activeContact.value) return
-
-  const jid = getContactJid(activeContact.value)
-  if (!jid) return
-
-  // Recarregar dados completos do contacto (agora já tem user_id)
-  const { data: updatedContact } = await supabase
-    .from('contacts')
-    .select('*, users(*)')
-    .eq('remote_jid', jid)
-    .maybeSingle()
-
-  if (updatedContact) {
-    // Reactualizar contacto activo — o banner de "Lead" vai desaparecer automaticamente
-    activeContact.value = { ...activeContact.value, ...updatedContact }
-  }
-}
-
-const onDeleteMessage = async (msgId: string) => {
-  try {
-    await evo.deleteMessage(msgId)
-    const jid = activeContact.value ? getContactJid(activeContact.value) : ''
-    if (jid) {
-      messagesStore.clearJid(jid) 
-      await messagesStore.fetchFromSupabase(jid)
-    }
-  } catch (err) {
-    console.error('[DELETE MESSAGE] Erro:', err)
-  }
-}
-
-// Envio de texto
+// ── Envio de texto ────────────────────────────────────────────────────────────
 const onSendText = async (content: string, quotedId?: string) => {
   if (!activeContact.value || sending.value) return
-
-  const rawPhone = activeContact.value.phone_number || activeContact.value.phone || activeContact.value.whatsapp || ''
-  if (!rawPhone) return
+  const phone = getContactPhone(activeContact.value) || activeContact.value?.remote_jid?.split('@')[0]
+  if (!phone) return
 
   const finalContent = agentSignature.value.trim()
     ? `${content}\n\n${agentSignature.value.trim()}`
     : content
 
-  sending.value = true
-  // ID local temporário vinculado ao JID
   const jid = getContactJid(activeContact.value)
-  const localId = messagesStore.addOutgoing(jid, finalContent, 'text')
+  const localId = messagesStore.addOutgoing(jid, finalContent)
+  sending.value = true
 
   try {
-    const res = await evo.sendText(rawPhone, finalContent, quotedId)
-    const messageId = res.key?.id || res.id
-    
-    if (messageId) {
-      await messagesStore.addAndSaveOutgoing({
-        localId,
-        messageId,
-        jid,
-        contactId: activeContact.value?.id,
-        content: finalContent,
-        type: 'text'
-      })
-    }
-    markContactAsMessaged(activeContact.value)
+    const res = await evo.sendText(phone, finalContent, quotedId)
+    const realId = res?.key?.id || res?.id
+    if (realId) messagesStore.confirmOutgoing(localId, jid, realId)
   } catch (err: any) {
-    console.error('[SEND TEXT]', err?.response?.data || err.message)
+    console.error('[SEND TEXT]', err?.response?.data || err?.message)
     messagesStore.updateStatus(localId, 'error')
   } finally {
     sending.value = false
   }
 }
 
-// Envio de media (imagem, áudio, vídeo, documento)
+// ── Envio de media ────────────────────────────────────────────────────────────
 const onSendMedia = async (opts: {
   type: 'image' | 'audio' | 'video' | 'document'
   base64: string
@@ -605,45 +261,79 @@ const onSendMedia = async (opts: {
   caption?: string
 }) => {
   if (!activeContact.value || sending.value) return
-
-  const rawPhone = activeContact.value.phone_number || activeContact.value.phone || activeContact.value.whatsapp || ''
-  if (!rawPhone) return
-
-  sending.value = true
+  const phone = getContactPhone(activeContact.value) || activeContact.value?.remote_jid?.split('@')[0]
+  if (!phone) return
 
   const jid = getContactJid(activeContact.value)
   const previewContent = opts.caption || (opts.type === 'image' ? '[Imagem]' : opts.type === 'audio' ? '[Áudio]' : '[Ficheiro]')
-  const localId = messagesStore.addOutgoing(jid, previewContent, opts.type, {
-    mimeType: opts.mimeType,
-    caption: opts.caption
-  })
+  const localId = messagesStore.addOutgoing(jid, previewContent, opts.type)
+  sending.value = true
 
   try {
-    const res = await evo.sendMedia(rawPhone, { ...opts, quotedId: (opts as any).quotedId })
-    const messageId = res.key?.id || res.id
-    
-    if (messageId) {
-      await messagesStore.addAndSaveOutgoing({
-        localId,
-        messageId,
-        jid,
-        contactId: activeContact.value?.id,
-        content: previewContent,
-        type: opts.type,
-        mimeType: opts.mimeType,
-        caption: opts.caption
-      })
-    }
-    markContactAsMessaged(activeContact.value)
+    const res = await evo.sendMedia(phone, opts)
+    const realId = res?.key?.id || res?.id
+    if (realId) messagesStore.confirmOutgoing(localId, jid, realId)
   } catch (err: any) {
-    console.error('[SEND MEDIA]', err?.response?.data || err.message)
+    console.error('[SEND MEDIA]', err?.response?.data || err?.message)
     messagesStore.updateStatus(localId, 'error')
   } finally {
     sending.value = false
   }
 }
 
-// Search debounce
+// ── Apagar mensagem ───────────────────────────────────────────────────────────
+const onDeleteMessage = async (msgId: string) => {
+  try {
+    await evo.deleteMessage(msgId)
+    const jid = activeContact.value ? getContactJid(activeContact.value) : ''
+    if (jid) {
+      messagesStore.clearJid(jid)
+      const msgs = await evo.fetchHistory(jid, 30)
+      if (msgs.length > 0) messagesStore.loadFromEvolution(jid, msgs)
+    }
+  } catch (err) {
+    console.error('[DELETE]', err)
+  }
+}
+
+// ── User found (Lojou check) ──────────────────────────────────────────────────
+const onUserFound = (_userData: any) => { /* futuro */ }
+
+// ── Assinatura ────────────────────────────────────────────────────────────────
+watch(agentSignature, (val) => {
+  if (typeof window !== 'undefined') localStorage.setItem('lojou_agent_signature', val)
+})
+
+// ── Lifecycle ─────────────────────────────────────────────────────────────────
+onMounted(async () => {
+  if (typeof window !== 'undefined') {
+    agentSignature.value = localStorage.getItem('lojou_agent_signature') || ''
+  }
+
+  // Carregar chats da Evolution
+  await loadChats()
+
+  // Polling da lista de chats a cada 10s
+  chatsPollTimer = setInterval(async () => {
+    try {
+      await loadChats()
+    } catch (e) {
+      console.warn('[CHATS POLL] Erro:', e)
+    }
+  }, 10000)
+
+  // Carregar contactos Lojou (para o search modal)
+  if (contactsStore.contacts.length === 0) {
+    contactsStore.fetchContacts({ is_paginate: true, per_page: 100, page: 1 })
+  }
+})
+
+onUnmounted(() => {
+  clearInterval(pollTimer)
+  clearInterval(chatsPollTimer)
+})
+
+// ── Search Modal ──────────────────────────────────────────────────────────────
 watch(globalSearchQuery, (q) => {
   clearTimeout(debounceTimer)
   if (!q.trim()) {
@@ -656,18 +346,18 @@ watch(globalSearchQuery, (q) => {
     try {
       const res = await api.get('/admin/users', { params: { search: q.trim(), is_paginate: 1, per_page: 50, page: 1 } })
       const data = res.data
-      let list = []
+      let list: any[] = []
       if (data?.users && Array.isArray(data.users)) list = data.users
       else if (data?.data && Array.isArray(data.data)) list = data.data
       else if (Array.isArray(data)) list = data
       searchResults.value = list
     } catch {
       const q2 = q.trim().toLowerCase()
-      searchResults.value = contactsStore.contacts.filter((c: any) => {
-        return (c.full_name || c.name || '').toLowerCase().includes(q2) ||
-               (c.email || '').toLowerCase().includes(q2) ||
-               (c.phone_number || '').includes(q2)
-      })
+      searchResults.value = contactsStore.contacts.filter((c: any) =>
+        (c.full_name || c.name || '').toLowerCase().includes(q2) ||
+        (c.email || '').toLowerCase().includes(q2) ||
+        (c.phone_number || '').includes(q2)
+      )
     } finally {
       searchLoading.value = false
     }
@@ -711,27 +401,14 @@ const startConversationWith = (user: any) => {
 const onNewChat = (phone: string) => {
   const cleanPhone = phone.replace(/\D/g, '')
   if (!cleanPhone) return
-
-  // Tenta encontrar um contato existente com esse telefone antes de criar um novo
-  const existing = contactsStore.contacts.find(c => {
-    const cPhone = normalizePhone(String(c.phone_number || c.phone || (c as any).whatsapp || ''))
-    return cPhone === normalizePhone(cleanPhone)
-  })
-
-  if (existing) {
-    selectContact(existing)
-    return
-  }
-
-  const newContact = {
+  selectContact({
     id: 'local_' + Date.now(),
-    phone_number: phone,
-    name: phone,
-    full_name: phone,
-    status: 'active',
-    remote_jid: buildJid(phone)
-  }
-  contactsStore.contacts.unshift(newContact as any)
-  selectContact(newContact)
+    phone_number: cleanPhone,
+    name: cleanPhone,
+    remote_jid: buildJid(cleanPhone)
+  })
 }
+
+// ── Sync all (mantido para compatibilidade com botão) ─────────────────────────
+const syncAll = refreshChats
 </script>

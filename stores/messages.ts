@@ -1,21 +1,21 @@
 import { defineStore } from 'pinia'
-import { useSupabaseClient } from '#imports'
 import type { EvoMessage } from '~/composables/useEvolution'
 
+// Store in-memory puro — sem Supabase para display
+// A fonte da verdade é a Evolution API directamente
+
 export interface Message {
-  id: string // message_id da Evolution
-  contact_id?: string // UUID do contato no banco
-  remote_jid: string // JID completo (ex: 5511...@s.whatsapp.net)
+  id: string
+  remote_jid: string
   content: string
   status: 'sending' | 'sent' | 'delivered' | 'read' | 'error'
   timestamp: string
   is_outgoing: boolean
   type: 'text' | 'image' | 'audio' | 'video' | 'document'
-  mediaBase64?: string
   mediaUrl?: string
   mimeType?: string
   caption?: string
-  metadata?: any
+  pushName?: string
 }
 
 const EVO_STATUS_MAP: Record<string, Message['status']> = {
@@ -28,65 +28,35 @@ const EVO_STATUS_MAP: Record<string, Message['status']> = {
 
 export const useMessageStore = defineStore('messages', {
   state: () => ({
-    // Agrupamos mensagens por remoteJid (Identificador Único Universal do WhatsApp)
     messagesByJid: {} as Record<string, Message[]>,
     loading: false
   }),
+
   getters: {
-    getMessagesByJid: (state) => (jid: string) => {
+    getMessagesByJid: (state) => (jid: string): Message[] => {
       if (!jid) return []
-      return (state.messagesByJid[jid] || [])
-        .slice()
-        .sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime())
-    },
-    // Legado para compatibilidade com partes que ainda usam phone
-    getMessagesByPhone: (state) => (phone: string) => {
-      if (!phone) return []
-      const jid = phone.includes('@') ? phone : `${phone.replace(/\D/g, '')}@s.whatsapp.net`
       return (state.messagesByJid[jid] || [])
         .slice()
         .sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime())
     }
   },
-  actions: {
-    // Helper interno para inserir/atualizar de forma isolada por JID e ID de mensagem
-    upsertIntoStore(msg: Message) {
-      const jid = msg.remote_jid
-      if (!jid) return
 
-      if (!this.messagesByJid[jid]) {
-        this.messagesByJid[jid] = []
-      }
-      
+  actions: {
+    upsertIntoStore(msg: Message) {
+      if (!msg.remote_jid || !msg.id) return
+      const jid = msg.remote_jid
+      if (!this.messagesByJid[jid]) this.messagesByJid[jid] = []
       const list = this.messagesByJid[jid]
-      const index = list.findIndex(m => m.id === msg.id)
-      
-      if (index !== -1) {
-        // Atualização reativa preservando campos não enviados no update
-        list[index] = { ...list[index], ...msg }
+      const idx = list.findIndex(m => m.id === msg.id)
+      if (idx !== -1) {
+        list[idx] = { ...list[idx], ...msg }
       } else {
         list.push(msg)
       }
     },
 
-    updateStatus(id: string, status: Message['status']) {
-      if (!id) return
-
-      for (const jid of Object.keys(this.messagesByJid)) {
-        const found = this.messagesByJid[jid]?.find(message => message.id === id)
-        if (found) {
-          found.status = status
-          return
-        }
-      }
-    },
-
-    addOutgoing(
-      jid: string,
-      content: string,
-      type: Message['type'] = 'text',
-      media?: Pick<Message, 'mediaUrl' | 'mimeType' | 'caption'>
-    ): string {
+    // Adiciona mensagem optimista local (antes de enviar)
+    addOutgoing(jid: string, content: string, type: Message['type'] = 'text'): string {
       const id = 'local_' + Date.now()
       this.upsertIntoStore({
         id,
@@ -95,161 +65,50 @@ export const useMessageStore = defineStore('messages', {
         status: 'sending',
         timestamp: new Date().toISOString(),
         is_outgoing: true,
-        type,
-        ...media
+        type
       })
       return id
     },
 
-    async addAndSaveOutgoing(params: {
-      localId: string,
-      messageId: string,
-      jid: string,
-      contactId?: string,
-      content: string,
-      type: Message['type'],
-      mediaUrl?: string,
-      mimeType?: string,
-      caption?: string
-    }) {
-      const client = useSupabaseClient()
-      
-      // Atualiza no store local (troca ID temporário por ID real da Evolution)
-      const list = this.messagesByJid[params.jid] || []
-      const msg = list.find(m => m.id === params.localId)
+    // Confirma mensagem enviada com ID real da Evolution
+    confirmOutgoing(localId: string, jid: string, realId: string) {
+      const list = this.messagesByJid[jid] || []
+      const msg = list.find(m => m.id === localId)
       if (msg) {
-        msg.id = params.messageId
+        msg.id = realId
         msg.status = 'sent'
-      }
-
-      const payload = {
-        id: params.messageId, // ID unificado
-        message_id: params.messageId,
-        contact_id: params.contactId,
-        remote_jid: params.jid,
-        content: params.content,
-        type: params.type,
-        is_outgoing: true,
-        status: 'sent',
-        timestamp: new Date().toISOString(),
-        media_url: params.mediaUrl,
-        mime_type: params.mimeType,
-        caption: params.caption,
-        metadata: { source: 'app_outgoing' }
-      }
-
-      try {
-        await (client.from('messages').upsert(payload as any, { onConflict: 'message_id' }) as any)
-      } catch (e) {
-        console.error('[STORE] Erro ao persistir mensagem enviada:', e)
       }
     },
 
-    async syncFromEvolution(jid: string, evoMessages: EvoMessage[]) {
-      const client = useSupabaseClient()
-      const { data: contactRow } = await (client
-        .from('contacts')
-        .select('id')
-        .eq('remote_jid', jid)
-        .maybeSingle() as any)
-
-      const contactId = contactRow?.id || undefined
-      const toUpsert: any[] = []
-
+    // Carrega mensagens da Evolution para o store (in-memory)
+    loadFromEvolution(jid: string, evoMessages: EvoMessage[]) {
       for (const em of evoMessages) {
         if (!em.evoId) continue
-
-        // Procura optimista por mensagens locais em envio
-        const list = this.messagesByJid[jid] || []
-        const optimistic = list.find(m =>
-          m.id.startsWith('local_') &&
-          m.is_outgoing === em.fromMe &&
-          m.content === em.content &&
-          Math.abs(new Date(m.timestamp).getTime() - em.timestamp) < 60000
-        )
-
-        if (optimistic) {
-          optimistic.id = em.evoId 
-          optimistic.status = EVO_STATUS_MAP[em.status] || 'delivered'
-        }
-
-        const msgObj: Message = {
+        this.upsertIntoStore({
           id: em.evoId,
-          contact_id: contactId,
-          remote_jid: jid,
+          remote_jid: jid, // usar o JID canónico da conversa
           content: em.content,
           status: EVO_STATUS_MAP[em.status] || 'delivered',
           timestamp: new Date(em.timestamp).toISOString(),
           is_outgoing: em.fromMe,
           type: em.type,
-          mediaBase64: em.mediaBase64,
           mediaUrl: em.mediaUrl,
           mimeType: em.mimeType,
-          caption: em.caption
-        }
-
-        this.upsertIntoStore(msgObj)
-
-        toUpsert.push({
-          id: em.evoId,
-          message_id: em.evoId,
-          contact_id: contactId,
-          remote_jid: jid,
-          content: em.content || '',
-          type: em.type,
-          is_outgoing: em.fromMe,
-          status: EVO_STATUS_MAP[em.status] || 'delivered',
-          timestamp: new Date(em.timestamp).toISOString(),
-          media_url: em.mediaUrl,
-          mime_type: em.mimeType,
           caption: em.caption,
-          metadata: { source: 'sync_evolution' }
+          pushName: em.pushName
         })
       }
-
-      if (toUpsert.length > 0) {
-        try {
-          // Usamos upsert por message_id para garantir que não duplicamos se o JID mudar
-          await (client.from('messages').upsert(toUpsert as any, { onConflict: 'message_id' }) as any)
-        } catch (e) {
-          console.error('[DATABASE] Falha no sync evolution:', e)
-        }
-      }
-    },
-
-    async fetchFromSupabase(jid: string) {
-      if (!jid) return
-      const client = useSupabaseClient()
-
-      const { data, error } = await (client.from('messages')
-        .select('*')
-        .eq('remote_jid', jid)
-        .order('timestamp', { ascending: true }) as any)
-
-      if (error) {
-        console.error('[STORE] Erro ao buscar mensagens por JID:', error)
-        return
-      }
-
-      ((data as any[]) || []).forEach((m: any) => {
-        this.upsertIntoStore({
-          id: m.message_id || m.id,
-          contact_id: m.contact_id,
-          remote_jid: jid,
-          content: m.content || '',
-          status: m.status as any,
-          timestamp: m.timestamp,
-          is_outgoing: m.is_outgoing,
-          type: m.type as any,
-          mediaUrl: m.media_url,
-          mimeType: m.mime_type,
-          caption: m.caption
-        })
-      })
     },
 
     clearJid(jid: string) {
       delete this.messagesByJid[jid]
+    },
+
+    updateStatus(id: string, status: Message['status']) {
+      for (const jid of Object.keys(this.messagesByJid)) {
+        const found = this.messagesByJid[jid]?.find(m => m.id === id)
+        if (found) { found.status = status; return }
+      }
     }
   }
 })

@@ -9,53 +9,50 @@ export interface EvoMessage {
   type: 'text' | 'image' | 'audio' | 'video' | 'document'
   timestamp: number
   status: string
-  mediaBase64?: string
   mediaUrl?: string
   mimeType?: string
   caption?: string
+  pushName?: string
+}
+
+export interface EvoChat {
+  id: string          // remoteJid
+  name: string        // nome do contacto
+  lastMessage?: string
+  lastTimestamp?: number
+  unreadCount?: number
 }
 
 export const useEvolution = () => {
   const clientSupabase = useSupabaseClient()
 
-  // Número moçambicano: 9 dígitos começando por 8 → adiciona 258
+  // ── Normalização de número (Moçambique) ──────────────────────────────────
   const formatPhone = (raw: string): string => {
-    let d = raw.replace(/\D/g, '')
-    // Se começar com 258, remover para normalizar internamente
-    if (d.startsWith('258') && d.length > 9) {
-      d = d.slice(3)
-    }
-    // Para envio/fetch na Evolution, garantimos o 258 se for Moçambique (9 dígitos começando por 8)
-    if (d.length === 9 && d.startsWith('8')) {
-      return '258' + d
-    }
+    let d = String(raw).replace(/\D/g, '')
+    if (d.startsWith('258') && d.length > 9) d = d.slice(3)
+    if (d.length === 9 && d.startsWith('8')) return '258' + d
     return d
   }
 
+  // ── Credenciais ──────────────────────────────────────────────────────────
   const fetchSettings = async () => {
-    const { data, error } = await (clientSupabase
-      .from('settings')
-      .select('value')
-      .eq('key', 'evolution_config')
-      .maybeSingle() as any)
-    
-    if (error || !data) return null
-    return (data as any).value as { url: string; key: string; instance: string }
+    try {
+      const { data, error } = await (clientSupabase
+        .from('settings')
+        .select('value')
+        .eq('key', 'evolution_config')
+        .maybeSingle() as any)
+      if (error || !data) return null
+      return (data as any).value as { url: string; key: string; instance: string }
+    } catch { return null }
   }
 
   const saveSettings = async (url: string, key: string, instance: string) => {
     const value = { url, key, instance }
     const { error } = await ((clientSupabase as any)
       .from('settings')
-      .upsert({ 
-        key: 'evolution_config', 
-        value, 
-        updated_at: new Date().toISOString() 
-      }, { onConflict: 'key' }))
-    
+      .upsert({ key: 'evolution_config', value, updated_at: new Date().toISOString() }, { onConflict: 'key' }))
     if (error) throw error
-    
-    // Sync to localStorage as fallback
     if (typeof window !== 'undefined') {
       localStorage.setItem('evolution_url', url)
       localStorage.setItem('evolution_api_key', key)
@@ -66,7 +63,6 @@ export const useEvolution = () => {
   const getCredentials = async () => {
     const remote = await fetchSettings()
     if (remote) return remote
-
     if (typeof window === 'undefined') return null
     const url = localStorage.getItem('evolution_url')?.replace(/\/$/, '')
     const key = localStorage.getItem('evolution_api_key')
@@ -80,118 +76,118 @@ export const useEvolution = () => {
     if (!creds) return null
     return {
       http: axios.create({
-        baseURL: creds.url,
-        headers: { apikey: creds.key, 'Content-Type': 'application/json' }
+        baseURL: creds.url.replace(/\/$/, ''),
+        headers: { apikey: creds.key, 'Content-Type': 'application/json' },
+        timeout: 15000
       }),
       instance: creds.instance
     }
   }
 
+  // ── Parsear mensagem do formato Evolution ────────────────────────────────
   const parseRecord = (r: any): EvoMessage | null => {
     if (!r?.key) return null
+
     let msg = r.message || {}
-    
-    // Handle nested message structures (ephemeral, view once, etc.)
     if (msg.ephemeralMessage) msg = msg.ephemeralMessage.message || {}
     if (msg.viewOnceMessage) msg = msg.viewOnceMessage.message || {}
     if (msg.viewOnceMessageV2) msg = msg.viewOnceMessageV2.message || {}
 
     let type: EvoMessage['type'] = 'text'
     let content = ''
-    let mediaBase64: string | undefined
     let mediaUrl: string | undefined
     let mimeType: string | undefined
     let caption: string | undefined
 
     if (msg.conversation) {
-      type = 'text'
       content = msg.conversation
     } else if (msg.extendedTextMessage) {
-      type = 'text'
       content = msg.extendedTextMessage.text || ''
     } else if (msg.imageMessage) {
       type = 'image'
-      caption = msg.imageMessage.caption || ''
+      caption = msg.imageMessage.caption || undefined
       content = caption || '[Imagem]'
-      mediaBase64 = msg.imageMessage.base64 || r.base64
       mediaUrl = msg.imageMessage.url
       mimeType = msg.imageMessage.mimetype || 'image/jpeg'
     } else if (msg.audioMessage || msg.pttMessage) {
       type = 'audio'
       content = '[Áudio]'
       const am = msg.audioMessage || msg.pttMessage
-      mediaBase64 = am?.base64 || r.base64
       mediaUrl = am?.url
-      mimeType = am?.mimetype || 'audio/ogg; codecs=opus'
+      mimeType = am?.mimetype || 'audio/ogg'
     } else if (msg.videoMessage) {
       type = 'video'
-      caption = msg.videoMessage.caption || ''
+      caption = msg.videoMessage.caption || undefined
       content = caption || '[Vídeo]'
       mediaUrl = msg.videoMessage.url
       mimeType = msg.videoMessage.mimetype || 'video/mp4'
     } else if (msg.documentMessage) {
       type = 'document'
-      content = msg.documentMessage.fileName || msg.documentMessage.title || '[Documento]'
+      content = msg.documentMessage.fileName || '[Documento]'
       mediaUrl = msg.documentMessage.url
       mimeType = msg.documentMessage.mimetype
     } else if (msg.stickerMessage) {
-       // Support stickers as images for now
-       type = 'image'
-       content = '[Sticker]'
-       mediaUrl = msg.stickerMessage.url
-       mimeType = msg.stickerMessage.mimetype || 'image/webp'
+      type = 'image'
+      content = '[Sticker]'
+      mediaUrl = msg.stickerMessage.url
+      mimeType = msg.stickerMessage.mimetype || 'image/webp'
     } else if (msg.buttonsMessage || msg.templateMessage || msg.listMessage) {
-       // Text fallback for interactive messages
-       type = 'text'
-       content = (msg.buttonsMessage?.contentText || msg.templateMessage?.hydratedTemplate?.hydratedContentText || msg.listMessage?.description || '[Mensagem Interativa]')
+      content = msg.buttonsMessage?.contentText
+        || msg.templateMessage?.hydratedTemplate?.hydratedContentText
+        || msg.listMessage?.description
+        || '[Mensagem Interativa]'
     } else {
-      // Last resort: check if there is any text-like property
-      const possibleText = msg.text || msg.caption || msg.description
-      if (possibleText) {
-        type = 'text'
-        content = possibleText
-      } else {
-        return null
-      }
+      const fallback = msg.text || msg.caption || msg.description
+      if (fallback) content = fallback
+      else return null
     }
 
-    let remoteJid = r.key.remoteJid || ''
-    if (remoteJid.includes('@s.whatsapp.net')) {
-      const rawNum = remoteJid.split('@')[0]
-      if (rawNum.length === 9 && rawNum.startsWith('8')) {
-        remoteJid = '258' + rawNum + '@s.whatsapp.net'
-      }
-    }
+    // JID — normaliza mas NÃO filtra: aceitar qualquer formato
+    const rawJid = r.key.remoteJid || ''
+
+    const ts = r.messageTimestamp
+      ? (Number(r.messageTimestamp) > 1_000_000_000_000
+          ? Number(r.messageTimestamp)
+          : Number(r.messageTimestamp) * 1000)
+      : Date.now()
 
     return {
       evoId: r.key.id,
-      remoteJid,
+      remoteJid: rawJid,
       fromMe: Boolean(r.key.fromMe),
-      content, 
+      content,
       type,
-      timestamp: r.messageTimestamp 
-        ? (Number(r.messageTimestamp) > 1000000000000 ? Number(r.messageTimestamp) : Number(r.messageTimestamp) * 1000) 
-        : Date.now(),
+      timestamp: ts,
       status: r.status || 'DELIVERY_ACK',
-      mediaBase64, mediaUrl, mimeType, caption
+      mediaUrl,
+      mimeType,
+      caption,
+      pushName: r.pushName || undefined
     }
   }
 
-  const fetchHistory = async (rawPhone: string, limit = 60): Promise<EvoMessage[]> => {
+  // ── Buscar histórico de mensagens — Evolution direto ────────────────────
+  const fetchHistory = async (remoteJid: string, limit = 60): Promise<EvoMessage[]> => {
     const c = await makeClient()
     if (!c) return []
-    const phone = formatPhone(rawPhone)
-    const jid = phone + '@s.whatsapp.net'
-    console.log(`[EVO DEBUG] Buscando histórico para JID: ${jid}`)
-    // Tentar múltiplos formatos de query (compatibilidade V1/V2 correta)
+
+    // Normaliza o JID para enviar à Evolution
+    const phone = String(remoteJid).replace(/\D/g, '')
+    const jid = phone.includes('@') ? phone : phone + '@s.whatsapp.net'
+
     const attempts = [
+      // Formato v2 correto
       () => c.http.post(`/chat/findMessages/${c.instance}`, {
-        where: { remoteJid: jid }, limit: limit
+        where: { key: { remoteJid: jid } },
+        limit
       }),
+      // Formato alternativo
       () => c.http.post(`/chat/findMessages/${c.instance}`, {
-        where: { key: { remoteJid: jid } }, limit: limit
+        where: { remoteJid: jid },
+        limit
       }),
-      () => c.http.get(`/chat/fetchMessages/${c.instance}`, {
+      // GET endpoint
+      () => c.http.get(`/chat/findMessages/${c.instance}`, {
         params: { remoteJid: jid, limit }
       })
     ]
@@ -200,46 +196,102 @@ export const useEvolution = () => {
       try {
         const res = await attempt()
         const data = res.data
-        const raw = data?.messages?.records || data?.messages || data?.data || data?.records || (Array.isArray(data) ? data : [])
-        
+        const raw: any[] = data?.messages?.records
+          || data?.messages
+          || data?.records
+          || (Array.isArray(data) ? data : [])
+
         if (Array.isArray(raw) && raw.length > 0) {
-          const parsed = raw
-            .map(parseRecord)
-            .filter(Boolean) as EvoMessage[]
-
-          // ── FILTRO CRÍTICO: só aceitar mensagens do JID exacto ──────────
-          // Sem este filtro, mensagens de outros contactos entram no chat errado
-          const filtered = parsed.filter(m => m.remoteJid === jid)
-          
-          if (filtered.length < parsed.length) {
-            console.warn(`[EVO] ⚠️  Removidas ${parsed.length - filtered.length} mensagens de outros JIDs (de ${parsed.length} total) para ${jid}`)
-          }
-
-          console.log(`[EVO] Sync para ${jid}: ${filtered.length} mensagens válidas.`)
-          return filtered
+          const parsed = raw.map(parseRecord).filter(Boolean) as EvoMessage[]
+          console.log(`[EVO] fetchHistory ${jid}: ${parsed.length} mensagens`)
+          return parsed
         }
       } catch (e: any) {
-        console.warn(`[EVO] Tentativa falhou para ${phone}:`, e.message)
-        continue
+        console.warn(`[EVO] fetchHistory tentativa falhou:`, e?.message)
       }
     }
     return []
   }
 
+  // ── Buscar lista de chats ────────────────────────────────────────────────
+  const fetchChats = async (): Promise<EvoChat[]> => {
+    const c = await makeClient()
+    if (!c) return []
+
+    const attempts = [
+      () => c.http.get(`/chat/findChats/${c.instance}`),
+      () => c.http.post(`/chat/findChats/${c.instance}`, {}),
+      () => c.http.get(`/chat/getChats/${c.instance}`)
+    ]
+
+    for (const attempt of attempts) {
+      try {
+        const res = await attempt()
+        const raw: any[] = Array.isArray(res.data) ? res.data : (res.data?.chats || [])
+        if (raw.length > 0) {
+          return raw
+            .filter(ch => {
+              const id = ch.id || ch.remoteJid || ''
+              return id.includes('@s.whatsapp.net') // só individuais
+            })
+            .map(ch => ({
+              id: ch.id || ch.remoteJid,
+              name: ch.name || ch.pushName || (ch.id || '').split('@')[0],
+              lastMessage: ch.lastMessage?.message?.conversation
+                || ch.lastMessage?.message?.extendedTextMessage?.text
+                || ch.lastMessage?.content
+                || '',
+              lastTimestamp: ch.lastMessage?.messageTimestamp
+                ? Number(ch.lastMessage.messageTimestamp) * 1000
+                : (ch.updatedAt ? new Date(ch.updatedAt).getTime() : Date.now()),
+              unreadCount: ch.unreadCount || 0
+            }))
+        }
+      } catch (e: any) {
+        console.warn(`[EVO] fetchChats tentativa falhou:`, e?.message)
+      }
+    }
+    return []
+  }
+
+  // ── Enviar mensagem de texto ─────────────────────────────────────────────
   const sendText = async (rawPhone: string, text: string, quotedId?: string) => {
     const c = await makeClient()
     if (!c) throw new Error('Evolution não configurado')
-    const payload: any = {
-      number: formatPhone(rawPhone),
-      text
+
+    const number = formatPhone(rawPhone)
+
+    // Tentar formato v2 primeiro, depois formato v1
+    const payloads = [
+      // Evolution API v2
+      {
+        number,
+        textMessage: { text },
+        ...(quotedId ? { quoted: { key: { id: quotedId } } } : {})
+      },
+      // Evolution API v1 / compatibilidade
+      {
+        number,
+        text,
+        ...(quotedId ? { quoted: { key: { id: quotedId } } } : {})
+      }
+    ]
+
+    let lastError: any
+    for (const payload of payloads) {
+      try {
+        const res = await c.http.post(`/message/sendText/${c.instance}`, payload)
+        console.log(`[EVO] sendText OK para ${number}`)
+        return res.data
+      } catch (e: any) {
+        lastError = e
+        console.warn(`[EVO] sendText tentativa falhou:`, e?.message)
+      }
     }
-    if (quotedId) {
-      payload.quoted = { key: { id: quotedId } }
-    }
-    const res = await c.http.post(`/message/sendText/${c.instance}`, payload)
-    return res.data
+    throw lastError
   }
 
+  // ── Enviar media ─────────────────────────────────────────────────────────
   const sendMedia = async (rawPhone: string, opts: {
     type: 'image' | 'audio' | 'video' | 'document'
     base64: string
@@ -259,56 +311,56 @@ export const useEvolution = () => {
       fileName: opts.filename,
       caption: opts.caption || ''
     }
-    if (opts.quotedId) {
-      payload.quoted = { key: { id: opts.quotedId } }
-    }
+    if (opts.quotedId) payload.quoted = { key: { id: opts.quotedId } }
     const res = await c.http.post(`/message/sendMedia/${c.instance}`, payload)
     return res.data
   }
 
+  // ── Apagar mensagem ──────────────────────────────────────────────────────
   const deleteMessage = async (messageId: string) => {
     const c = await makeClient()
     if (!c) throw new Error('Evolution não configurado')
-    // Evolution v2 usa DELETE /message/delete
     const res = await c.http.delete(`/message/delete/${c.instance}`, {
       data: { key: { id: messageId } }
     })
     return res.data
   }
 
+  // ── Configurar webhook ───────────────────────────────────────────────────
   const configureWebhook = async (webhookUrl: string) => {
     const c = await makeClient()
     if (!c) throw new Error('Evolution não configurado')
-    const res = await c.http.post(`/instance/setWebhook/${c.instance}`, {
-      url: webhookUrl,
-      enabled: true,
-      events: ['MESSAGES_UPSERT', 'MESSAGES_UPDATE', 'MESSAGES_SET', 'SEND_MESSAGE']
-    })
-    return res.data
-  }
 
-  const fetchChats = async (): Promise<any[]> => {
-    const c = await makeClient()
-    if (!c) return []
-    try {
-      // Evolution v2 endpoint
-      const res = await c.http.get(`/chat/getChats/${c.instance}`)
-      return res.data || []
-    } catch (e) {
-      console.warn('[EVO] Falha ao buscar chats:', e)
-      return []
+    const events = ['MESSAGES_UPSERT', 'MESSAGES_UPDATE', 'MESSAGES_SET', 'SEND_MESSAGE']
+
+    // Tentar ambos os endpoints conhecidos
+    const endpoints = [
+      `/webhook/set/${c.instance}`,
+      `/instance/setWebhook/${c.instance}`
+    ]
+
+    let lastErr: any
+    for (const ep of endpoints) {
+      try {
+        const res = await c.http.post(ep, { url: webhookUrl, enabled: true, events })
+        console.log(`[EVO] Webhook configurado via ${ep}`)
+        return res.data
+      } catch (e) {
+        lastErr = e
+      }
     }
+    throw lastErr
   }
 
-  return { 
-    formatPhone, 
-    fetchHistory, 
+  return {
+    formatPhone,
+    fetchHistory,
     fetchChats,
-    sendText, 
-    sendMedia, 
+    sendText,
+    sendMedia,
     deleteMessage,
-    configureWebhook, 
-    getCredentials, 
-    saveSettings 
+    configureWebhook,
+    getCredentials,
+    saveSettings
   }
 }
