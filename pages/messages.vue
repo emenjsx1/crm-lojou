@@ -255,48 +255,56 @@ const loadChats = async () => {
 
 const refreshChats = () => loadChats()
 
-// ── Seleccionar contacto e carregar histórico ────────────────────────────────
+// ── Carregar mensagens do Supabase por remote_jid (exacto e normalizado) ─────
+const loadMessages = async (jid: string) => {
+  const supabase = useSupabaseClient()
+  const phoneNorm = normalizePhone(jid.split('@')[0])
+
+  // Buscar mensagens pelos dois formatos possíveis (com/sem 258)
+  const jidWithout = phoneNorm + '@s.whatsapp.net'
+  const jidWith = '258' + phoneNorm + '@s.whatsapp.net'
+
+  const { data } = await (supabase as any)
+    .from('messages')
+    .select('*')
+    .or(`remote_jid.eq.${jidWith},remote_jid.eq.${jidWithout}`)
+    .order('timestamp', { ascending: true })
+    .limit(100)
+
+  if (!data) return
+
+  for (const m of data) {
+    messagesStore.upsertIntoStore({
+      id: m.message_id || m.id,
+      remote_jid: jid, // sempre usar o JID canónico no store
+      content: m.content || '',
+      status: m.status || 'delivered',
+      timestamp: m.timestamp || new Date().toISOString(),
+      is_outgoing: Boolean(m.is_outgoing),
+      type: m.type || 'text',
+      mediaUrl: m.media_url,
+      mimeType: m.mime_type,
+      caption: m.caption
+    })
+  }
+}
+
+// ── Seleccionar contacto ──────────────────────────────────────────────────────
 const selectContact = async (contact: any) => {
   clearInterval(pollTimer)
 
-  // Garantir JID canónico (com 258 para Moçambique)
-  const rawJid = getContactJid(contact)
-  const jid = canonicalJid(rawJid)
-  const phoneNorm = normalizePhone(jid.split('@')[0]) // sem 258
-
+  const jid = canonicalJid(getContactJid(contact))
   activeContact.value = { ...contact, remote_jid: jid }
   if (!jid) return
 
-  // Limpar mensagens anteriores
   messagesStore.clearJid(jid)
+  await loadMessages(jid)
 
-  // Carregar do Evolution com filtro por número normalizado
-  try {
-    const msgs = await evo.fetchHistory(jid, 60)
-    // Filtrar apenas mensagens deste número (aceita com/sem 258)
-    const filtered = msgs.filter(m => normalizePhone(m.remoteJid.split('@')[0]) === phoneNorm)
-    if (filtered.length > 0) {
-      messagesStore.loadFromEvolution(jid, filtered)
-    }
-  } catch (e) {
-    console.warn('[SELECT] Erro ao carregar histórico:', e)
-  }
-
-  // Polling do chat activo (a cada 5s)
+  // Polling: recarrega do Supabase a cada 4s (webhook actualiza Supabase em tempo real)
   pollTimer = setInterval(async () => {
     if (!activeContact.value) return
-    const currentJid = activeContact.value.remote_jid
-    const currentPhoneNorm = normalizePhone(currentJid.split('@')[0])
-    try {
-      const msgs = await evo.fetchHistory(currentJid, 30)
-      const filtered = msgs.filter(m => normalizePhone(m.remoteJid.split('@')[0]) === currentPhoneNorm)
-      if (filtered.length > 0) {
-        messagesStore.loadFromEvolution(currentJid, filtered)
-      }
-    } catch (e) {
-      console.warn('[POLL CHAT] Erro:', e)
-    }
-  }, 5000)
+    await loadMessages(activeContact.value.remote_jid)
+  }, 4000)
 }
 
 // ── Computed ──────────────────────────────────────────────────────────────────
@@ -367,11 +375,10 @@ const onSendMedia = async (opts: {
 const onDeleteMessage = async (msgId: string) => {
   try {
     await evo.deleteMessage(msgId)
-    const jid = activeContact.value ? getContactJid(activeContact.value) : ''
+    const jid = activeContact.value?.remote_jid
     if (jid) {
       messagesStore.clearJid(jid)
-      const msgs = await evo.fetchHistory(jid, 30)
-      if (msgs.length > 0) messagesStore.loadFromEvolution(jid, msgs)
+      await loadMessages(jid)
     }
   } catch (err) {
     console.error('[DELETE]', err)
