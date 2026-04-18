@@ -173,34 +173,60 @@ const findLojouUser = (jidPhone: string) => {
   }) || null
 }
 
-// ── Carregar chats da Evolution directamente ─────────────────────────────────
+// ── Carregar chats do Supabase (via webhook) + match Lojou ───────────────────
+// O webhook guarda cada mensagem → Supabase é a fonte da verdade para a sidebar
 const loadChats = async () => {
   try {
-    const evoChats = await evo.fetchChats()
-    if (evoChats.length > 0) {
-      chats.value = evoChats.map(c => {
-        const phone = c.id.split('@')[0]
-        const lojou = findLojouUser(phone)
-        return {
-          id: c.id,
-          remote_jid: c.id,
-          // Nome: preferência: Lojou > WhatsApp pushName > número
-          name: lojou
-            ? (lojou.full_name || lojou.firstname || lojou.name)
-            : (c.name || phone),
-          phone_number: phone,
-          lastMessage: c.lastMessage || '',
-          lastMessageTime: c.lastTimestamp ? new Date(c.lastTimestamp).toISOString() : new Date().toISOString(),
-          unreadCount: c.unreadCount || 0,
-          // Dados Lojou para o ChatWindow
-          user_id: lojou?.id || null,
-          lojou_status: lojou?.status || null,
-          lojou_balance: lojou?.balance || null
-        }
-      })
+    const supabase = useSupabaseClient()
+
+    // 1. Buscar JIDs com mensagens, ordenados pela última mensagem
+    const { data: msgs } = await (supabase as any)
+      .from('messages')
+      .select('remote_jid, content, timestamp, is_outgoing')
+      .order('timestamp', { ascending: false })
+      .limit(300)
+
+    if (!msgs || msgs.length === 0) return
+
+    // 2. Agrupar por remote_jid — primeira ocorrência = mais recente
+    const seen = new Map<string, any>()
+    for (const m of msgs) {
+      if (!m.remote_jid) continue
+      if (!seen.has(m.remote_jid)) seen.set(m.remote_jid, m)
     }
+
+    // 3. Para cada JID, buscar nome no contacto Supabase e match Lojou
+    const { data: contacts } = await (supabase as any)
+      .from('contacts')
+      .select('remote_jid, name, phone')
+
+    const contactMap = new Map<string, any>()
+    for (const c of (contacts || [])) {
+      if (c.remote_jid) contactMap.set(c.remote_jid, c)
+    }
+
+    // 4. Construir lista final
+    chats.value = Array.from(seen.values()).map(m => {
+      const jid = m.remote_jid
+      const phone = jid.split('@')[0]
+      const dbContact = contactMap.get(jid)
+      const lojou = findLojouUser(phone)
+
+      return {
+        id: jid,
+        remote_jid: jid,
+        name: lojou
+          ? (lojou.full_name || lojou.firstname || lojou.name)
+          : (dbContact?.name || phone),
+        phone_number: phone,
+        lastMessage: m.content || '',
+        lastMessageTime: m.timestamp || new Date().toISOString(),
+        user_id: lojou?.id || null,
+        lojou_status: lojou?.status || null
+      }
+    })
   } catch (e) {
-    console.warn('[CHATS] Falha ao carregar chats da Evolution:', e)
+    console.warn('[CHATS] Falha ao carregar chats:', e)
   }
 }
 
