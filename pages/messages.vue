@@ -385,73 +385,74 @@ const recentChats = ref<any[]>([])
 
 const loadRecentChats = async () => {
   if (!supabase) supabase = useSupabaseClient()
-  
+
+  // Buscar contactos + última mensagem de cada JID num único query
   const { data: contactRows } = await supabase
     .from('contacts')
     .select('*, users(*)')
     .order('created_at', { ascending: false })
-    .limit(50)
-  
-  let merged: any[] = contactRows || []
+    .limit(100)
 
-  if (merged.length < 15) {
-    const { data: recentMsgs } = await supabase
-      .from('messages')
-      .select('remote_jid')
-      .order('timestamp', { ascending: false })
-      .limit(100)
-    
-    if (recentMsgs) {
-      const uniqueJids = [...new Set((recentMsgs as any[]).map((m: any) => m.remote_jid).filter(Boolean))] as string[]
-      for (const jid of uniqueJids) {
-        if (!merged.find(c => c.remote_jid === jid)) {
-          merged.push({ 
-            id: 'orphan_' + jid, 
-            remote_jid: jid, 
-            phone: jid.split('@')[0],
-            name: jid.split('@')[0],
-            metadata: { source: 'orphan' } 
-          })
-        }
-      }
+  // Buscar JIDs com mensagens (para garantir que novos contactos aparecem)
+  const { data: recentMsgs } = await supabase
+    .from('messages')
+    .select('remote_jid, content, timestamp, is_outgoing')
+    .order('timestamp', { ascending: false })
+    .limit(200)
+
+  // Construir mapa de última mensagem por JID
+  const lastMsgByJid = new Map<string, any>()
+  for (const m of (recentMsgs || [])) {
+    if (!m.remote_jid) continue
+    const jidKey = normalizePhone(m.remote_jid.split('@')[0])
+    if (!lastMsgByJid.has(jidKey)) {
+      lastMsgByJid.set(jidKey, m)
     }
   }
 
-  if (merged.length > 0) {
-    const enriched = await Promise.all(merged.map(async (c: any) => {
-      const standardJid = getContactJid(c) || buildJid(getContactPhone(c))
-      const phoneLocal = normalizePhone(standardJid || getContactPhone(c))
+  // Mapa phoneLocal → chat (deduplicação por número normalizado)
+  // Evita que 855253617 e 258855253617 apareçam duas vezes
+  const dedupedMap = new Map<string, any>()
 
-      const { data: lastMsg } = await supabase
-        .from('messages')
-        .select('content, timestamp, is_outgoing')
-        .eq('remote_jid', standardJid)
-        .order('timestamp', { ascending: false })
-        .limit(1)
-        .maybeSingle()
-      
-      return {
-        ...c,
-        phoneLocal,
-        remote_jid: standardJid,
-        name: c.users?.name || c.full_name || c.name || c.phone || standardJid.split('@')[0],
-        lastMessage: lastMsg?.content || '...',
-        lastMessageTime: lastMsg?.timestamp || c.created_at || new Date().toISOString()
-      }
-    }))
-
-    const dedupedMap = new Map()
-    for (const chat of enriched) {
-      if (!dedupedMap.has(chat.remote_jid) || 
-          new Date(chat.lastMessageTime) > new Date(dedupedMap.get(chat.remote_jid).lastMessageTime)) {
-        dedupedMap.set(chat.remote_jid, chat)
-      }
+  // 1. Processar contactos do Supabase
+  for (const c of (contactRows || [])) {
+    const jid = getContactJid(c)
+    if (!jid) continue
+    const phoneKey = normalizePhone(jid.split('@')[0])
+    const lastMsg = lastMsgByJid.get(phoneKey)
+    const entry = {
+      ...c,
+      phoneLocal: phoneKey,
+      remote_jid: jid,
+      name: c.users?.name || c.full_name || c.name || c.phone || jid.split('@')[0],
+      lastMessage: lastMsg?.content || null,
+      lastMessageTime: lastMsg?.timestamp || c.created_at || new Date().toISOString()
     }
-    
-    recentChats.value = Array.from(dedupedMap.values()).sort(
-      (a: any, b: any) => new Date(b.lastMessageTime).getTime() - new Date(a.lastMessageTime).getTime()
-    )
+    // Ficar com a entrada que tem mensagem mais recente
+    if (!dedupedMap.has(phoneKey) ||
+        new Date(entry.lastMessageTime) > new Date(dedupedMap.get(phoneKey).lastMessageTime)) {
+      dedupedMap.set(phoneKey, entry)
+    }
   }
+
+  // 2. Adicionar JIDs com mensagens que não têm contacto criado (novos leads)
+  for (const [phoneKey, msg] of lastMsgByJid) {
+    if (dedupedMap.has(phoneKey)) continue
+    const jid = msg.remote_jid
+    dedupedMap.set(phoneKey, {
+      id: 'orphan_' + jid,
+      phoneLocal: phoneKey,
+      remote_jid: jid,
+      phone: jid.split('@')[0],
+      name: jid.split('@')[0],
+      lastMessage: msg.content || null,
+      lastMessageTime: msg.timestamp || new Date().toISOString()
+    })
+  }
+
+  recentChats.value = Array.from(dedupedMap.values()).sort(
+    (a, b) => new Date(b.lastMessageTime).getTime() - new Date(a.lastMessageTime).getTime()
+  )
 }
 
 const activeConversations = computed(() => {

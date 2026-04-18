@@ -1,32 +1,34 @@
 import { defineEventHandler, readBody } from 'h3'
-import {
-  createServerSupabase,
-  lookupLojouUserByPhone,
-  normalizePhone,
-  normalizeRemoteJid,
-  upsertContactAssociation,
-  upsertLocalUserCache
-} from '~/server/utils/lojou'
+import { useRuntimeConfig } from '#imports'
+import { createClient } from '@supabase/supabase-js'
 
-const normalizeTimestamp = (raw: unknown) => {
-  const value = Number(raw)
-  if (!Number.isFinite(value) || value <= 0) {
-    return new Date().toISOString()
+// ─────────────────────────────────────────────────────────────
+// WEBHOOK EVOLUTION — versão directa (sem integração Lojou)
+// Identificador principal: remoteJid normalizado (com 258 para Moçambique)
+// Nome do contacto: pushName do WhatsApp
+// ─────────────────────────────────────────────────────────────
+
+const normalizeRemoteJid = (jid: string): string => {
+  if (!jid.includes('@s.whatsapp.net')) return jid
+  const raw = jid.split('@')[0].replace(/\D/g, '')
+  // Moçambique: 9 dígitos começando em 8 → adiciona 258
+  if (raw.length === 9 && raw.startsWith('8')) {
+    return '258' + raw + '@s.whatsapp.net'
   }
-  return new Date(value > 1000000000000 ? value : value * 1000).toISOString()
+  return jid
 }
 
-const extractMessagePayload = (body: any) => {
-  const payload = body?.data || body
-  const message = payload?.message && payload?.key ? payload : (payload?.message || payload)
-  return { payload, message }
+const normalizeTimestamp = (raw: unknown): string => {
+  const value = Number(raw)
+  if (!Number.isFinite(value) || value <= 0) return new Date().toISOString()
+  return new Date(value > 1_000_000_000_000 ? value : value * 1000).toISOString()
 }
 
-const extractMessageContent = (message: any) => {
-  let contentNode = message?.message || {}
-  if (contentNode.ephemeralMessage) contentNode = contentNode.ephemeralMessage.message || {}
-  if (contentNode.viewOnceMessage) contentNode = contentNode.viewOnceMessage.message || {}
-  if (contentNode.viewOnceMessageV2) contentNode = contentNode.viewOnceMessageV2.message || {}
+const extractContent = (message: any) => {
+  let node = message?.message || {}
+  if (node.ephemeralMessage) node = node.ephemeralMessage.message || {}
+  if (node.viewOnceMessage) node = node.viewOnceMessage.message || {}
+  if (node.viewOnceMessageV2) node = node.viewOnceMessageV2.message || {}
 
   let type: 'text' | 'image' | 'audio' | 'video' | 'document' = 'text'
   let content = ''
@@ -34,38 +36,46 @@ const extractMessageContent = (message: any) => {
   let mimeType: string | null = null
   let caption: string | null = null
 
-  if (contentNode.conversation) {
-    content = contentNode.conversation
-  } else if (contentNode.extendedTextMessage) {
-    content = contentNode.extendedTextMessage.text || ''
-  } else if (contentNode.imageMessage) {
+  if (node.conversation) {
+    content = node.conversation
+  } else if (node.extendedTextMessage) {
+    content = node.extendedTextMessage.text || ''
+  } else if (node.imageMessage) {
     type = 'image'
-    caption = contentNode.imageMessage.caption || null
+    caption = node.imageMessage.caption || null
     content = caption || '[Imagem]'
-    mediaUrl = contentNode.imageMessage.url || null
-    mimeType = contentNode.imageMessage.mimetype || 'image/jpeg'
-  } else if (contentNode.audioMessage || contentNode.pttMessage) {
-    const audioNode = contentNode.audioMessage || contentNode.pttMessage
+    mediaUrl = node.imageMessage.url || null
+    mimeType = node.imageMessage.mimetype || 'image/jpeg'
+  } else if (node.audioMessage || node.pttMessage) {
+    const a = node.audioMessage || node.pttMessage
     type = 'audio'
     content = '[Áudio]'
-    mediaUrl = audioNode?.url || null
-    mimeType = audioNode?.mimetype || 'audio/ogg'
-  } else if (contentNode.videoMessage) {
+    mediaUrl = a?.url || null
+    mimeType = a?.mimetype || 'audio/ogg'
+  } else if (node.videoMessage) {
     type = 'video'
-    caption = contentNode.videoMessage.caption || null
+    caption = node.videoMessage.caption || null
     content = caption || '[Vídeo]'
-    mediaUrl = contentNode.videoMessage.url || null
-    mimeType = contentNode.videoMessage.mimetype || 'video/mp4'
-  } else if (contentNode.documentMessage) {
+    mediaUrl = node.videoMessage.url || null
+    mimeType = node.videoMessage.mimetype || 'video/mp4'
+  } else if (node.documentMessage) {
     type = 'document'
-    content = contentNode.documentMessage.fileName || contentNode.documentMessage.title || '[Documento]'
-    mediaUrl = contentNode.documentMessage.url || null
-    mimeType = contentNode.documentMessage.mimetype || 'application/octet-stream'
-  } else if (contentNode.stickerMessage) {
+    content = node.documentMessage.fileName || node.documentMessage.title || '[Documento]'
+    mediaUrl = node.documentMessage.url || null
+    mimeType = node.documentMessage.mimetype || 'application/octet-stream'
+  } else if (node.stickerMessage) {
     type = 'image'
     content = '[Sticker]'
-    mediaUrl = contentNode.stickerMessage.url || null
-    mimeType = contentNode.stickerMessage.mimetype || 'image/webp'
+    mediaUrl = node.stickerMessage.url || null
+    mimeType = node.stickerMessage.mimetype || 'image/webp'
+  } else if (node.buttonsMessage || node.templateMessage || node.listMessage) {
+    content = node.buttonsMessage?.contentText
+      || node.templateMessage?.hydratedTemplate?.hydratedContentText
+      || node.listMessage?.description
+      || '[Mensagem Interativa]'
+  } else {
+    const fallback = node.text || node.caption || node.description
+    content = fallback || ''
   }
 
   return { type, content, mediaUrl, mimeType, caption }
@@ -73,110 +83,108 @@ const extractMessageContent = (message: any) => {
 
 export default defineEventHandler(async (event) => {
   const body = await readBody(event)
-  const rawEvent = String(body?.event || body?.type || '').toUpperCase()
-  const eventName = rawEvent.replace(/\./g, '_')
+  const rawEvent = String(body?.event || body?.type || '').toUpperCase().replace(/\./g, '_')
   const allowedEvents = ['MESSAGES_UPSERT', 'MESSAGES_UPDATE', 'MESSAGES_SET', 'SEND_MESSAGE']
 
-  if (!allowedEvents.includes(eventName)) {
-    return { status: 'ignored', event: eventName }
+  if (!allowedEvents.includes(rawEvent)) {
+    return { status: 'ignored', event: rawEvent }
   }
 
-  const { payload, message } = extractMessagePayload(body)
+  // ── Extrair payload ──────────────────────────────────────────────────────
+  const payload = body?.data || body
+  const message = payload?.message && payload?.key ? payload : (payload?.message || payload)
+
   if (!message?.key) {
-    console.error('[WEBHOOK] Missing key in payload:', JSON.stringify(body).substring(0, 300))
+    console.error('[WEBHOOK] Missing key:', JSON.stringify(body).substring(0, 200))
     return { status: 'error', reason: 'missing_key' }
   }
 
-  const remoteJid = normalizeRemoteJid(message.key.remoteJid || '')
+  const remoteJid = normalizeRemoteJid(String(message.key.remoteJid || ''))
   const messageId = String(message.key.id || '')
-  const pushName = payload?.pushName || message?.pushName || null
-  const isOutgoing = Boolean(message.key.fromMe) || eventName === 'SEND_MESSAGE'
+  const pushName: string | null = payload?.pushName || message?.pushName || null
+  const isOutgoing = Boolean(message.key.fromMe) || rawEvent === 'SEND_MESSAGE'
 
+  // Ignorar grupos e broadcast status
   if (!remoteJid || remoteJid.endsWith('@g.us') || remoteJid.startsWith('status@')) {
     return { status: 'ignored', reason: 'group_or_status' }
   }
 
+  // Validar número
   const phone = remoteJid.split('@')[0]
-  const phoneLocal = normalizePhone(phone)
-  if (!phoneLocal) {
+  if (!phone || !/^\d+$/.test(phone)) {
     return { status: 'ignored', reason: 'invalid_phone' }
   }
 
-  const supabase = createServerSupabase()
+  const config = useRuntimeConfig()
+  const supabase = createClient(
+    config.public.supabaseUrl as string,
+    config.public.supabaseKey as string
+  )
 
-  const { data: existingContact } = await supabase
+  // ── Upsert contacto por remoteJid (identificador único) ─────────────────
+  // Nunca criar duplicados — conflito resolve-se pelo remoteJid
+  const { data: contact, error: contactError } = await supabase
     .from('contacts')
-    .select('*')
-    .eq('remote_jid', remoteJid)
+    .upsert({
+      remote_jid: remoteJid,
+      phone: phone,
+      // Só actualiza o nome se o pushName vier preenchido (não apagar nome existente)
+      ...(pushName ? { name: pushName } : {}),
+      source: 'evolution',
+      updated_at: new Date().toISOString()
+    }, {
+      onConflict: 'remote_jid',
+      ignoreDuplicates: false
+    })
+    .select('id, name, user_id')
     .maybeSingle()
 
-  const shouldLookupLojou = !isOutgoing || !existingContact?.user_id
-  const lookup = shouldLookupLojou
-    ? await lookupLojouUserByPhone(supabase, phone)
-    : { found: false, user: null, authSource: null, error: null as string | null }
-
-  const localUser = lookup.found && lookup.user
-    ? await upsertLocalUserCache(supabase, lookup.user)
-    : null
-
-  const contact = await upsertContactAssociation(supabase, {
-    remoteJid,
-    phone,
-    pushName,
-    existingContact,
-    localUser,
-    source: localUser ? 'lojou' : 'lead',
-    lookupError: lookup.error || null
-  })
-
-  const messageData = extractMessageContent(message)
-  const messageMetadata = {
-    source: 'webhook_evolution',
-    event: eventName,
-    remoteJid,
-    normalized_phone: phoneLocal,
-    messageId,
-    pushName,
-    lookup: {
-      auth_source: lookup.authSource,
-      found_user: Boolean(localUser),
-      error: lookup.error || null
-    },
-    payload: body
+  if (contactError) {
+    console.error('[WEBHOOK] Erro ao upsert contacto:', JSON.stringify(contactError))
   }
 
-  if (messageId) {
-    const { error } = await supabase
-      .from('messages')
-      .upsert({
-        id: messageId,
-        message_id: messageId,
-        contact_id: contact?.id || null,
-        remote_jid: remoteJid,
-        content: messageData.content || '',
-        type: messageData.type,
-        is_outgoing: isOutgoing,
-        status: 'delivered',
-        timestamp: normalizeTimestamp(message.messageTimestamp),
-        media_url: messageData.mediaUrl,
-        mime_type: messageData.mimeType,
-        caption: messageData.caption,
-        metadata: messageMetadata
-      }, { onConflict: 'message_id' })
-
-    if (error) {
-      console.error('[WEBHOOK] Failed to persist message:', JSON.stringify(error))
-    }
+  // ── Guardar mensagem (idempotente pelo message_id) ───────────────────────
+  if (!messageId) {
+    return { status: 'ok', event: rawEvent, reason: 'no_message_id' }
   }
+
+  const { content, type, mediaUrl, mimeType, caption } = extractContent(message)
+
+  const { error: msgError } = await supabase
+    .from('messages')
+    .upsert({
+      id: messageId,
+      message_id: messageId,
+      contact_id: contact?.id || null,
+      remote_jid: remoteJid,
+      content: content || '',
+      type,
+      is_outgoing: isOutgoing,
+      status: 'delivered',
+      timestamp: normalizeTimestamp(message.messageTimestamp),
+      media_url: mediaUrl,
+      mime_type: mimeType,
+      caption,
+      metadata: {
+        source: 'webhook_evolution',
+        event: rawEvent,
+        pushName,
+        messageId
+      }
+    }, { onConflict: 'message_id' })
+
+  if (msgError) {
+    console.error('[WEBHOOK] Erro ao guardar mensagem:', JSON.stringify(msgError))
+  }
+
+  console.log(`[WEBHOOK] ✅ ${rawEvent} | ${remoteJid} | out:${isOutgoing} | "${content.substring(0, 40)}"`)
 
   return {
     status: 'ok',
-    event: eventName,
+    event: rawEvent,
     jid: remoteJid,
-    phone,
     message_id: messageId,
     contact_id: contact?.id || null,
-    user_id: contact?.user_id || null,
-    classified: contact?.user_id ? 'known_user' : 'new_lead'
+    contact_name: contact?.name || pushName || phone
   }
 })
