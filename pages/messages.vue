@@ -166,66 +166,78 @@ const normalizePhone = (raw: string) => String(raw || '').replace(/\D/g, '').rep
 
 // ── Match com Lojou: retorna o utilizador Lojou ou null ─────────────────────
 const findLojouUser = (jidPhone: string) => {
-  const local = normalizePhone(jidPhone) // ex: "855253617"
+  const local = normalizePhone(String(jidPhone)) // ex: "855253617"
   if (!local || local.length < 7) return null
-  return contactsStore.contacts.find((c: any) => {
-    // A Lojou pode retornar phone_number, mobile_number, ou phone
+  const match = contactsStore.contacts.find((c: any) => {
     const raw = c.phone_number || c.mobile_number || c.phone || ''
     const cp = normalizePhone(String(raw))
     return cp.length >= 7 && cp === local
   }) || null
+  return match
+}
+
+// ── Normalizar JID para forma canónica (sempre com 258 para Moçambique) ───────
+const canonicalJid = (jid: string): string => {
+  if (!jid.includes('@')) return jid
+  const raw = jid.split('@')[0].replace(/\D/g, '')
+  // 9 dígitos começando em 8 → adiciona 258
+  const phone = (raw.length === 9 && raw.startsWith('8')) ? '258' + raw : raw
+  return phone + '@s.whatsapp.net'
 }
 
 // ── Carregar chats do Supabase (via webhook) + match Lojou ───────────────────
-// O webhook guarda cada mensagem → Supabase é a fonte da verdade para a sidebar
 const loadChats = async () => {
   try {
     const supabase = useSupabaseClient()
 
-    // 1. Buscar JIDs com mensagens, ordenados pela última mensagem
+    // 1. Buscar mensagens ordenadas pela mais recente
     const { data: msgs } = await (supabase as any)
       .from('messages')
       .select('remote_jid, content, timestamp, is_outgoing')
       .order('timestamp', { ascending: false })
-      .limit(300)
+      .limit(500)
 
     if (!msgs || msgs.length === 0) return
 
-    // 2. Agrupar por remote_jid — primeira ocorrência = mais recente
-    const seen = new Map<string, any>()
+    // 2. Deduplicar por número normalizado (sem 258)
+    // Assim 855253617@... e 258855253617@... → mesma entrada, JID canónico (com 258)
+    const byPhone = new Map<string, { jid: string; msg: any }>()
     for (const m of msgs) {
       if (!m.remote_jid) continue
-      if (!seen.has(m.remote_jid)) seen.set(m.remote_jid, m)
+      const phoneKey = normalizePhone(m.remote_jid.split('@')[0]) // sem 258
+      if (!byPhone.has(phoneKey)) {
+        byPhone.set(phoneKey, { jid: canonicalJid(m.remote_jid), msg: m })
+      }
     }
 
-    // 3. Para cada JID, buscar nome no contacto Supabase e match Lojou
+    // 3. Buscar nomes dos contactos Supabase (indexado por número normalizado)
     const { data: contacts } = await (supabase as any)
       .from('contacts')
       .select('remote_jid, name, phone')
 
-    const contactMap = new Map<string, any>()
+    const contactByPhone = new Map<string, any>()
     for (const c of (contacts || [])) {
-      if (c.remote_jid) contactMap.set(c.remote_jid, c)
+      if (c.remote_jid) {
+        const key = normalizePhone(c.remote_jid.split('@')[0])
+        contactByPhone.set(key, c)
+      }
     }
 
-    // 4. Construir lista final
-    chats.value = Array.from(seen.values()).map(m => {
-      const jid = m.remote_jid
-      const phone = jid.split('@')[0]
-      const dbContact = contactMap.get(jid)
-      const lojou = findLojouUser(phone)
+    // 4. Construir lista final já ordenada (Map mantém inserção = ordem da query)
+    chats.value = Array.from(byPhone.entries()).map(([phoneKey, { jid, msg }]) => {
+      const dbContact = contactByPhone.get(phoneKey)
+      const lojou = findLojouUser(phoneKey) // já está normalizado
 
       return {
         id: jid,
         remote_jid: jid,
         name: lojou
           ? (lojou.full_name || lojou.firstname || lojou.name)
-          : (dbContact?.name || phone),
-        phone_number: phone,
-        lastMessage: m.content || '',
-        lastMessageTime: m.timestamp || new Date().toISOString(),
+          : (dbContact?.name || jid.split('@')[0]),
+        phone_number: jid.split('@')[0],
+        lastMessage: msg.content || '',
+        lastMessageTime: msg.timestamp || new Date().toISOString(),
         user_id: lojou?.id || null,
-        // Passar objecto users completo → ChatWindow não mostra banner "Lead"
         users: lojou ? {
           id: lojou.id,
           name: lojou.full_name || lojou.firstname || lojou.name,
@@ -234,6 +246,8 @@ const loadChats = async () => {
         } : null
       }
     })
+
+    console.log(`[CHATS] ${chats.value.length} conversas carregadas`)
   } catch (e) {
     console.warn('[CHATS] Falha ao carregar chats:', e)
   }
@@ -244,37 +258,45 @@ const refreshChats = () => loadChats()
 // ── Seleccionar contacto e carregar histórico ────────────────────────────────
 const selectContact = async (contact: any) => {
   clearInterval(pollTimer)
-  activeContact.value = contact
 
-  const jid = getContactJid(contact)
+  // Garantir JID canónico (com 258 para Moçambique)
+  const rawJid = getContactJid(contact)
+  const jid = canonicalJid(rawJid)
+  const phoneNorm = normalizePhone(jid.split('@')[0]) // sem 258
+
+  activeContact.value = { ...contact, remote_jid: jid }
   if (!jid) return
 
-  // Limpar mensagens anteriores e carregar do Evolution
+  // Limpar mensagens anteriores
   messagesStore.clearJid(jid)
 
-  const phone = jid.split('@')[0]
+  // Carregar do Evolution com filtro por número normalizado
   try {
     const msgs = await evo.fetchHistory(jid, 60)
-    if (msgs.length > 0) {
-      messagesStore.loadFromEvolution(jid, msgs)
+    // Filtrar apenas mensagens deste número (aceita com/sem 258)
+    const filtered = msgs.filter(m => normalizePhone(m.remoteJid.split('@')[0]) === phoneNorm)
+    if (filtered.length > 0) {
+      messagesStore.loadFromEvolution(jid, filtered)
     }
   } catch (e) {
     console.warn('[SELECT] Erro ao carregar histórico:', e)
   }
 
-  // Polling do chat activo (a cada 4s)
+  // Polling do chat activo (a cada 5s)
   pollTimer = setInterval(async () => {
     if (!activeContact.value) return
-    const currentJid = getContactJid(activeContact.value)
+    const currentJid = activeContact.value.remote_jid
+    const currentPhoneNorm = normalizePhone(currentJid.split('@')[0])
     try {
       const msgs = await evo.fetchHistory(currentJid, 30)
-      if (msgs.length > 0) {
-        messagesStore.loadFromEvolution(currentJid, msgs)
+      const filtered = msgs.filter(m => normalizePhone(m.remoteJid.split('@')[0]) === currentPhoneNorm)
+      if (filtered.length > 0) {
+        messagesStore.loadFromEvolution(currentJid, filtered)
       }
     } catch (e) {
       console.warn('[POLL CHAT] Erro:', e)
     }
-  }, 4000)
+  }, 5000)
 }
 
 // ── Computed ──────────────────────────────────────────────────────────────────
@@ -391,33 +413,39 @@ onMounted(async () => {
       const m = payload.new
       if (!m?.remote_jid || !m?.id) return
 
-      const jid = m.remote_jid
+      const jid = canonicalJid(m.remote_jid) // normalizar JID
+      const phoneKey = normalizePhone(jid.split('@')[0])
 
-      // Adicionar ao store in-memory
-      messagesStore.upsertIntoStore({
-        id: m.message_id || m.id,
-        remote_jid: jid,
-        content: m.content || '',
-        status: m.status || 'delivered',
-        timestamp: m.timestamp || new Date().toISOString(),
-        is_outgoing: Boolean(m.is_outgoing),
-        type: m.type || 'text',
-        mediaUrl: m.media_url,
-        mimeType: m.mime_type,
-        caption: m.caption
-      })
+      // Se é do chat activo, adicionar ao store in-memory
+      if (activeContact.value) {
+        const activePhone = normalizePhone(activeContact.value.remote_jid?.split('@')[0] || '')
+        if (activePhone === phoneKey) {
+          messagesStore.upsertIntoStore({
+            id: m.message_id || m.id,
+            remote_jid: activeContact.value.remote_jid,
+            content: m.content || '',
+            status: m.status || 'delivered',
+            timestamp: m.timestamp || new Date().toISOString(),
+            is_outgoing: Boolean(m.is_outgoing),
+            type: m.type || 'text',
+            mediaUrl: m.media_url,
+            mimeType: m.mime_type,
+            caption: m.caption
+          })
+        }
+      }
 
-      // Actualizar última mensagem da sidebar
-      const chatIdx = chats.value.findIndex(c => c.remote_jid === jid)
+      // Actualizar sidebar — encontrar por número normalizado
+      const chatIdx = chats.value.findIndex(c =>
+        normalizePhone(c.remote_jid?.split('@')[0] || '') === phoneKey
+      )
       if (chatIdx >= 0) {
         chats.value[chatIdx].lastMessage = m.content || ''
         chats.value[chatIdx].lastMessageTime = m.timestamp || new Date().toISOString()
-        // Mover para o topo
         const updated = chats.value.splice(chatIdx, 1)[0]
         chats.value.unshift(updated)
       } else {
-        // Chat novo — recarregar lista
-        loadChats()
+        loadChats() // chat novo — recarregar lista
       }
     })
     .subscribe()
