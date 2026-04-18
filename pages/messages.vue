@@ -167,9 +167,12 @@ const normalizePhone = (raw: string) => String(raw || '').replace(/\D/g, '').rep
 // ── Match com Lojou: retorna o utilizador Lojou ou null ─────────────────────
 const findLojouUser = (jidPhone: string) => {
   const local = normalizePhone(jidPhone) // ex: "855253617"
+  if (!local || local.length < 7) return null
   return contactsStore.contacts.find((c: any) => {
-    const cp = normalizePhone(String(c.phone_number || c.mobile_number || ''))
-    return cp && cp === local
+    // A Lojou pode retornar phone_number, mobile_number, ou phone
+    const raw = c.phone_number || c.mobile_number || c.phone || ''
+    const cp = normalizePhone(String(raw))
+    return cp.length >= 7 && cp === local
   }) || null
 }
 
@@ -222,7 +225,13 @@ const loadChats = async () => {
         lastMessage: m.content || '',
         lastMessageTime: m.timestamp || new Date().toISOString(),
         user_id: lojou?.id || null,
-        lojou_status: lojou?.status || null
+        // Passar objecto users completo → ChatWindow não mostra banner "Lead"
+        users: lojou ? {
+          id: lojou.id,
+          name: lojou.full_name || lojou.firstname || lojou.name,
+          balance: lojou.balance || 0,
+          status: lojou.status || 'active'
+        } : null
       }
     })
   } catch (e) {

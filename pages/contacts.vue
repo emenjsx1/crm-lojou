@@ -85,6 +85,7 @@
                 <th class="px-6 py-4 font-semibold text-xs tracking-wide">ID</th>
                 <th class="px-6 py-4 font-semibold text-xs tracking-wide">Nome</th>
                 <th class="px-6 py-4 font-semibold text-xs tracking-wide">Email</th>
+                <th class="px-6 py-4 font-semibold text-xs tracking-wide">Telefone</th>
                 <th class="px-6 py-4 font-semibold text-xs tracking-wide text-center">Status</th>
                 <th class="px-6 py-4 font-semibold text-xs tracking-wide text-center">Total de pedidos</th>
                 <th class="px-6 py-4 font-semibold text-xs tracking-wide text-right">Total ganho</th>
@@ -100,6 +101,9 @@
                 <td class="px-6 py-4 text-zinc-600 dark:text-zinc-400 font-medium">{{ contact.id }}</td>
                 <td class="px-6 py-4 text-zinc-900 dark:text-white">{{ contact.full_name || contact.firstname || contact.name || 'Sem nome' }}</td>
                 <td class="px-6 py-4 text-zinc-900 dark:text-white font-medium">{{ contact.email || '-' }}</td>
+                <td class="px-6 py-4 text-zinc-700 dark:text-zinc-300 font-mono text-xs">
+                  {{ contact.phone_number || contact.mobile_number || '-' }}
+                </td>
 
                 <td class="px-6 py-4 text-center">
                    <div :class="[
