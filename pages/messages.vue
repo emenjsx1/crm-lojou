@@ -186,74 +186,48 @@ const canonicalJid = (jid: string): string => {
 }
 
 // ── Carregar chats do Supabase (via webhook) + match Lojou ───────────────────
+// ── Sidebar: carregar conversas DIRECTAMENTE do Evolution ────────────────────
 const loadChats = async () => {
   try {
-    const supabase = useSupabaseClient()
+    // Buscar as últimas 200 msgs de todos os JIDs do Evolution de uma vez
+    const evoAll = await evo.fetchAllRecent(200)
 
-    // ── 1. Supabase: última mensagem por JID (mais recentes primeiro) ─────────
-    const { data: msgs } = await (supabase as any)
-      .from('messages')
-      .select('remote_jid, content, timestamp, is_outgoing')
-      .order('timestamp', { ascending: false })
-      .limit(500)
+    if (!evoAll.length) {
+      console.warn('[CHATS] Evolution não retornou mensagens')
+      return
+    }
 
-    // ── 2. Deduplicar por número normalizado (sem 258) ────────────────────────
-    // 855253617@... e 258855253617@... → mesma entrada, JID canónico (com 258)
+    // Deduplicar por número normalizado → última msg é a mais recente (Evolution ordena)
     const byPhone = new Map<string, { jid: string; msg: any }>()
-    for (const m of (msgs || [])) {
-      if (!m.remote_jid) continue
-      const phoneKey = normalizePhone(m.remote_jid.split('@')[0])
+    for (const em of evoAll) {
+      if (!em.remoteJid || !em.remoteJid.includes('@s.whatsapp.net')) continue
+      const phoneKey = normalizePhone(em.remoteJid.split('@')[0])
       if (!byPhone.has(phoneKey)) {
-        byPhone.set(phoneKey, { jid: canonicalJid(m.remote_jid), msg: m })
+        const jid = canonicalJid(em.remoteJid)
+        byPhone.set(phoneKey, {
+          jid,
+          msg: {
+            content: em.content || '',
+            timestamp: new Date(em.timestamp).toISOString(),
+            is_outgoing: em.fromMe,
+            pushName: em.pushName
+          }
+        })
       }
     }
 
-    // ── 3. Evolution: mensagens recentes de TODOS os JIDs (histórico não salvo) ─
-    // Preenche contactos que existem no Evolution mas não no Supabase ainda
-    try {
-      const evoAll = await evo.fetchAllRecent(200)
-      for (const em of evoAll) {
-        if (!em.remoteJid || !em.remoteJid.includes('@s.whatsapp.net')) continue
-        const phoneKey = normalizePhone(em.remoteJid.split('@')[0])
-        if (!byPhone.has(phoneKey)) {
-          const jid = canonicalJid(em.remoteJid)
-          byPhone.set(phoneKey, {
-            jid,
-            msg: { content: em.content, timestamp: new Date(em.timestamp).toISOString(), is_outgoing: em.fromMe }
-          })
-        }
-      }
-    } catch (e) {
-      // silencioso — Evolution pode não suportar query sem filtro
-    }
-
-    // ── 4. Nomes dos contactos Supabase ───────────────────────────────────────
-    const { data: contacts } = await (supabase as any)
-      .from('contacts')
-      .select('remote_jid, name, phone')
-
-    const contactByPhone = new Map<string, any>()
-    for (const c of (contacts || [])) {
-      if (c.remote_jid) {
-        const key = normalizePhone(c.remote_jid.split('@')[0])
-        contactByPhone.set(key, c)
-      }
-    }
-
-    // ── 5. Construir lista ordenada (Map mantém inserção = ordem cronológica) ──
+    // Construir lista com match Lojou e ordenar pela mensagem mais recente
     const built = Array.from(byPhone.entries()).map(([phoneKey, { jid, msg }]) => {
-      const dbContact = contactByPhone.get(phoneKey)
       const lojou = findLojouUser(phoneKey)
-
       return {
         id: jid,
         remote_jid: jid,
         name: lojou
           ? (lojou.full_name || lojou.firstname || lojou.name)
-          : (dbContact?.name || phoneKey),
+          : (msg.pushName || phoneKey),
         phone_number: jid.split('@')[0],
-        lastMessage: msg.content || '',
-        lastMessageTime: msg.timestamp || new Date().toISOString(),
+        lastMessage: msg.content,
+        lastMessageTime: msg.timestamp,
         user_id: lojou?.id || null,
         users: lojou ? {
           id: lojou.id,
@@ -264,93 +238,24 @@ const loadChats = async () => {
       }
     })
 
-    if (built.length > 0) chats.value = built
+    // Ordenar: mais recentes no topo
+    built.sort((a, b) => new Date(b.lastMessageTime).getTime() - new Date(a.lastMessageTime).getTime())
 
-    console.log(`[CHATS] ${chats.value.length} conversas (Supabase: ${msgs?.length || 0}, Evolution: ${byPhone.size})`)
+    chats.value = built
+    console.log(`[CHATS] ${chats.value.length} conversas do Evolution`)
   } catch (e) {
-    console.warn('[CHATS] Falha ao carregar chats:', e)
+    console.warn('[CHATS] Falha ao carregar chats do Evolution:', e)
   }
 }
 
 const refreshChats = () => loadChats()
 
-// ── Helpers de carregamento de mensagens ─────────────────────────────────────
-
-// Só Supabase — chamado no poll a cada 4s (leve, sem Evolution)
-const loadMessagesFromSupabase = async (jid: string) => {
-  const supabase = useSupabaseClient()
-  const phoneNorm = normalizePhone(jid.split('@')[0])
-  const jidWithout = phoneNorm + '@s.whatsapp.net'
-  const jidWith = '258' + phoneNorm + '@s.whatsapp.net'
-
-  const { data: dbMsgs } = await (supabase as any)
-    .from('messages')
-    .select('*')
-    .or(`remote_jid.eq.${jidWith},remote_jid.eq.${jidWithout}`)
-    .order('timestamp', { ascending: true })
-    .limit(100)
-
-  for (const m of (dbMsgs || [])) {
-    const msgId = m.message_id || m.id
-    if (!msgId) continue
-    messagesStore.upsertIntoStore({
-      id: msgId,
-      remote_jid: jid,
-      content: m.content || '',
-      status: m.status || 'delivered',
-      timestamp: m.timestamp || new Date().toISOString(),
-      is_outgoing: Boolean(m.is_outgoing),
-      type: m.type || 'text',
-      mediaUrl: m.media_url,
-      mimeType: m.mime_type,
-      caption: m.caption
-    })
-  }
-}
-
-// Carga completa — chamada UMA VEZ ao abrir conversa (Supabase + Evolution)
+// ── Mensagens: carregar directamente do Evolution ─────────────────────────────
 const loadMessages = async (jid: string) => {
-  const seen = new Set<string>()
-
-  // ── Fonte 1: Supabase ────────────────────────────────────────────────────────
-  const supabase = useSupabaseClient()
-  const phoneNorm = normalizePhone(jid.split('@')[0])
-  const jidWithout = phoneNorm + '@s.whatsapp.net'
-  const jidWith = '258' + phoneNorm + '@s.whatsapp.net'
-
-  const { data: dbMsgs } = await (supabase as any)
-    .from('messages')
-    .select('*')
-    .or(`remote_jid.eq.${jidWith},remote_jid.eq.${jidWithout}`)
-    .order('timestamp', { ascending: true })
-    .limit(100)
-
-  for (const m of (dbMsgs || [])) {
-    const msgId = m.message_id || m.id
-    if (!msgId) continue
-    seen.add(msgId)
-    messagesStore.upsertIntoStore({
-      id: msgId,
-      remote_jid: jid,
-      content: m.content || '',
-      status: m.status || 'delivered',
-      timestamp: m.timestamp || new Date().toISOString(),
-      is_outgoing: Boolean(m.is_outgoing),
-      type: m.type || 'text',
-      mediaUrl: m.media_url,
-      mimeType: m.mime_type,
-      caption: m.caption
-    })
-  }
-
-  // ── Fonte 2: Evolution (histórico não salvo — preenche gaps) ─────────────────
   try {
-    const evoMsgs = await evo.fetchHistory(jid, 80)
-    let added = 0
+    const evoMsgs = await evo.fetchHistory(jid, 100)
     for (const em of evoMsgs) {
-      if (!em.evoId || seen.has(em.evoId)) continue
-      seen.add(em.evoId)
-      added++
+      if (!em.evoId) continue
       messagesStore.upsertIntoStore({
         id: em.evoId,
         remote_jid: jid,
@@ -365,9 +270,9 @@ const loadMessages = async (jid: string) => {
         pushName: em.pushName
       })
     }
-    console.log(`[MSGS] ${jid}: ${dbMsgs?.length || 0} Supabase + ${added} Evolution = ${seen.size} total`)
+    console.log(`[MSGS] ${jid}: ${evoMsgs.length} msgs do Evolution`)
   } catch (e) {
-    console.warn('[MSGS] Evolution fetchHistory falhou (silencioso):', e)
+    console.warn('[MSGS] Falha ao carregar mensagens do Evolution:', e)
   }
 }
 
@@ -380,13 +285,13 @@ const selectContact = async (contact: any) => {
   if (!jid) return
 
   messagesStore.clearJid(jid)
-  await loadMessages(jid) // carga inicial: Supabase + Evolution (1x só)
+  await loadMessages(jid) // carrega do Evolution
 
-  // Poll a cada 5s: só Supabase (leve) — não chama Evolution em loop
+  // Poll a cada 12s para captar novas mensagens (Evolution como fonte)
   pollTimer = setInterval(async () => {
     if (!activeContact.value) return
-    await loadMessagesFromSupabase(activeContact.value.remote_jid)
-  }, 5000)
+    await loadMessages(activeContact.value.remote_jid)
+  }, 12000)
 }
 
 // ── Computed ──────────────────────────────────────────────────────────────────
