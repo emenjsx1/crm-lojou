@@ -197,12 +197,10 @@ const loadChats = async () => {
       .order('timestamp', { ascending: false })
       .limit(500)
 
-    if (!msgs || msgs.length === 0) return
-
     // 2. Deduplicar por número normalizado (sem 258)
     // Assim 855253617@... e 258855253617@... → mesma entrada, JID canónico (com 258)
     const byPhone = new Map<string, { jid: string; msg: any }>()
-    for (const m of msgs) {
+    for (const m of (msgs || [])) {
       if (!m.remote_jid) continue
       const phoneKey = normalizePhone(m.remote_jid.split('@')[0]) // sem 258
       if (!byPhone.has(phoneKey)) {
@@ -224,7 +222,7 @@ const loadChats = async () => {
     }
 
     // 4. Construir lista final já ordenada (Map mantém inserção = ordem da query)
-    chats.value = Array.from(byPhone.entries()).map(([phoneKey, { jid, msg }]) => {
+    const built = Array.from(byPhone.entries()).map(([phoneKey, { jid, msg }]) => {
       const dbContact = contactByPhone.get(phoneKey)
       const lojou = findLojouUser(phoneKey) // já está normalizado
 
@@ -247,7 +245,9 @@ const loadChats = async () => {
       }
     })
 
-    console.log(`[CHATS] ${chats.value.length} conversas carregadas`)
+    if (built.length > 0) chats.value = built
+
+    console.log(`[CHATS] ${chats.value.length} conversas carregadas (Supabase: ${msgs?.length || 0} msgs)`)
   } catch (e) {
     console.warn('[CHATS] Falha ao carregar chats:', e)
   }
@@ -260,23 +260,27 @@ const loadMessages = async (jid: string) => {
   const supabase = useSupabaseClient()
   const phoneNorm = normalizePhone(jid.split('@')[0])
 
-  // Buscar mensagens pelos dois formatos possíveis (com/sem 258)
+  // Buscar mensagens pelos dois formatos possíveis de JID (com/sem prefixo 258)
   const jidWithout = phoneNorm + '@s.whatsapp.net'
   const jidWith = '258' + phoneNorm + '@s.whatsapp.net'
 
-  const { data } = await (supabase as any)
+  // ── Fonte 1: Supabase (mensagens salvas via webhook) ────────────────────────
+  const { data: dbMsgs } = await (supabase as any)
     .from('messages')
     .select('*')
     .or(`remote_jid.eq.${jidWith},remote_jid.eq.${jidWithout}`)
     .order('timestamp', { ascending: true })
     .limit(100)
 
-  if (!data) return
+  const seen = new Set<string>()
 
-  for (const m of data) {
+  for (const m of (dbMsgs || [])) {
+    const msgId = m.message_id || m.id
+    if (!msgId) continue
+    seen.add(msgId)
     messagesStore.upsertIntoStore({
-      id: m.message_id || m.id,
-      remote_jid: jid, // sempre usar o JID canónico no store
+      id: msgId,
+      remote_jid: jid,
       content: m.content || '',
       status: m.status || 'delivered',
       timestamp: m.timestamp || new Date().toISOString(),
@@ -286,6 +290,33 @@ const loadMessages = async (jid: string) => {
       mimeType: m.mime_type,
       caption: m.caption
     })
+  }
+
+  // ── Fonte 2: Evolution API (histórico — preenche mensagens antigas não salvas) ─
+  try {
+    const evoMsgs = await evo.fetchHistory(jid, 80)
+    for (const em of evoMsgs) {
+      if (!em.evoId || seen.has(em.evoId)) continue // já existe no Supabase
+      seen.add(em.evoId)
+      messagesStore.upsertIntoStore({
+        id: em.evoId,
+        remote_jid: jid,
+        content: em.content,
+        status: 'delivered',
+        timestamp: new Date(em.timestamp).toISOString(),
+        is_outgoing: em.fromMe,
+        type: em.type,
+        mediaUrl: em.mediaUrl,
+        mimeType: em.mimeType,
+        caption: em.caption,
+        pushName: em.pushName
+      })
+    }
+    if (evoMsgs.length > 0) {
+      console.log(`[MSGS] Evolution: ${evoMsgs.length} msgs carregadas para ${jid} (${seen.size} total no store)`)
+    }
+  } catch (e) {
+    console.warn('[MSGS] Evolution fetchHistory falhou (silencioso):', e)
   }
 }
 
@@ -401,7 +432,7 @@ onMounted(async () => {
 
   // 1. Carregar contactos Lojou primeiro (necessário para o match na sidebar)
   if (contactsStore.contacts.length === 0) {
-    await contactsStore.fetchContacts({ is_paginate: true, per_page: 500, page: 1 })
+    await contactsStore.fetchContacts({ is_paginate: true, per_page: 100, page: 1 })
   }
 
   // 2. Carregar chats da Evolution (agora com match Lojou)
