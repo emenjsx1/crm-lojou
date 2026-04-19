@@ -213,44 +213,77 @@ export const useEvolution = () => {
     return []
   }
 
-  // ── Buscar lista de chats ────────────────────────────────────────────────
+  // ── Parsear raw chat/contact object para EvoChat ────────────────────────
+  const parseChatRaw = (ch: any): EvoChat | null => {
+    const id = ch.id || ch.remoteJid || ch.jid || ''
+    if (!id || (!id.includes('@s.whatsapp.net') && !id.includes('@g.us'))) return null
+    if (id.includes('@g.us')) return null // ignorar grupos
+
+    // Extrair lastMessage de múltiplos formatos da API
+    const lm = ch.lastMessage || ch.last_message || null
+    const lastMsgNode = lm?.message || lm?.msg || lm || null
+    const lastMessage = lastMsgNode?.conversation
+      || lastMsgNode?.extendedTextMessage?.text
+      || lastMsgNode?.imageMessage?.caption
+      || lastMsgNode?.content
+      || ch.lastMsgText
+      || ''
+
+    const rawTs = lm?.messageTimestamp || lm?.timestamp || ch.updatedAt || ch.updated_at
+    const lastTimestamp = rawTs
+      ? (typeof rawTs === 'number'
+          ? (rawTs > 1_000_000_000_000 ? rawTs : rawTs * 1000)
+          : new Date(rawTs).getTime())
+      : Date.now()
+
+    return {
+      id,
+      name: ch.name || ch.pushName || ch.verifiedName || id.split('@')[0],
+      lastMessage,
+      lastTimestamp,
+      unreadCount: ch.unreadCount || ch.unread_count || 0
+    }
+  }
+
+  // ── Buscar lista de chats — tenta múltiplos endpoints/formatos ───────────
   const fetchChats = async (): Promise<EvoChat[]> => {
     const c = await makeClient()
     if (!c) return []
 
+    // Conforme documentação oficial e issues do GitHub:
+    // GET /chat/findChats/{instance} com body {} é o formato correcto
     const attempts = [
-      () => c.http.get(`/chat/findChats/${c.instance}`),
+      // Formato documentado no GitHub issue (GET com data body)
+      () => c.http.request({ method: 'get', url: `/chat/findChats/${c.instance}`, data: {} }),
+      // POST alternativo
       () => c.http.post(`/chat/findChats/${c.instance}`, {}),
-      () => c.http.get(`/chat/getChats/${c.instance}`)
+      // GET sem body
+      () => c.http.get(`/chat/findChats/${c.instance}`),
+      // Endpoint de contactos — fallback robusto
+      () => c.http.get(`/contact/findContacts/${c.instance}`),
+      () => c.http.post(`/contact/findContacts/${c.instance}`, { where: {} }),
     ]
 
     for (const attempt of attempts) {
       try {
         const res = await attempt()
-        const raw: any[] = Array.isArray(res.data) ? res.data : (res.data?.chats || [])
+        const raw: any[] = Array.isArray(res.data)
+          ? res.data
+          : (res.data?.chats || res.data?.contacts || res.data?.data || [])
+
         if (raw.length > 0) {
-          return raw
-            .filter(ch => {
-              const id = ch.id || ch.remoteJid || ''
-              return id.includes('@s.whatsapp.net') // só individuais
-            })
-            .map(ch => ({
-              id: ch.id || ch.remoteJid,
-              name: ch.name || ch.pushName || (ch.id || '').split('@')[0],
-              lastMessage: ch.lastMessage?.message?.conversation
-                || ch.lastMessage?.message?.extendedTextMessage?.text
-                || ch.lastMessage?.content
-                || '',
-              lastTimestamp: ch.lastMessage?.messageTimestamp
-                ? Number(ch.lastMessage.messageTimestamp) * 1000
-                : (ch.updatedAt ? new Date(ch.updatedAt).getTime() : Date.now()),
-              unreadCount: ch.unreadCount || 0
-            }))
+          const parsed = raw.map(parseChatRaw).filter(Boolean) as EvoChat[]
+          if (parsed.length > 0) {
+            console.log(`[EVO] fetchChats: ${parsed.length} chats`)
+            return parsed
+          }
         }
       } catch (e: any) {
-        console.warn(`[EVO] fetchChats tentativa falhou:`, e?.message)
+        // silencioso — tenta próximo formato
       }
     }
+
+    console.warn('[EVO] fetchChats: nenhum endpoint funcionou')
     return []
   }
 
@@ -353,34 +386,49 @@ export const useEvolution = () => {
   }
 
   // ── Buscar mensagens recentes de TODOS os JIDs (para popular sidebar) ───────
+  // Estratégia: primeiro tenta findMessages global, depois usa fetchChats como fallback
   const fetchAllRecent = async (limit = 200): Promise<EvoMessage[]> => {
     const c = await makeClient()
     if (!c) return []
 
-    // Tenta GET sem filtro de JID — retorna as últimas N mensagens de todas as conversas
-    const attempts = [
+    // Tentativa 1: findMessages sem filtro de JID (retorna global)
+    const globalAttempts = [
       () => c.http.post(`/chat/findMessages/${c.instance}`, { where: {}, limit }),
       () => c.http.post(`/chat/findMessages/${c.instance}`, { limit }),
-      () => c.http.get(`/chat/findMessages/${c.instance}`, { params: { limit } })
     ]
 
-    for (const attempt of attempts) {
+    for (const attempt of globalAttempts) {
       try {
         const res = await attempt()
         const data = res.data
-        const raw: any[] = data?.messages?.records
-          || data?.messages
-          || data?.records
-          || (Array.isArray(data) ? data : [])
+        const raw: any[] = data?.messages?.records || data?.messages || data?.records || (Array.isArray(data) ? data : [])
         if (Array.isArray(raw) && raw.length > 0) {
           const parsed = raw.map(parseRecord).filter(Boolean) as EvoMessage[]
-          console.log(`[EVO] fetchAllRecent: ${parsed.length} mensagens de ${new Set(parsed.map(m => m.remoteJid)).size} JIDs`)
-          return parsed
+          const uniqueJids = new Set(parsed.map(m => m.remoteJid)).size
+          console.log(`[EVO] fetchAllRecent global: ${parsed.length} msgs de ${uniqueJids} JIDs`)
+          if (uniqueJids > 1) return parsed // bom — múltiplos JIDs
         }
-      } catch (e: any) {
-        // silencioso — endpoint pode não existir sem filtro
-      }
+      } catch (_) {}
     }
+
+    // Tentativa 2: usar fetchChats para obter JIDs e simular mensagens de sidebar
+    // (não temos o conteúdo completo mas temos o suficiente para a lista)
+    const chats = await fetchChats()
+    if (chats.length > 0) {
+      console.log(`[EVO] fetchAllRecent via fetchChats: ${chats.length} chats`)
+      // Converter EvoChat para EvoMessage fake (só para popular a sidebar)
+      return chats.map(ch => ({
+        evoId: `chat_${ch.id}`,
+        remoteJid: ch.id,
+        fromMe: false,
+        content: ch.lastMessage || '',
+        type: 'text' as const,
+        timestamp: ch.lastTimestamp || Date.now(),
+        status: 'DELIVERY_ACK',
+        pushName: ch.name
+      }))
+    }
+
     return []
   }
 
