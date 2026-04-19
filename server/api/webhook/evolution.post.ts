@@ -165,6 +165,7 @@ export default defineEventHandler(async (event) => {
       media_url: mediaUrl,
       mime_type: mimeType,
       caption,
+      push_name: pushName,  // campo directo para o Realtime usar sem ir ao metadata
       metadata: {
         source: 'webhook_evolution',
         event: rawEvent,

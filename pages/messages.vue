@@ -460,12 +460,33 @@ onMounted(async () => {
         normalizePhone(c.remote_jid?.split('@')[0] || '') === phoneKey
       )
       if (chatIdx >= 0) {
+        // Chat já existe → actualizar última mensagem e subir ao topo
         chats.value[chatIdx].lastMessage = m.content || ''
         chats.value[chatIdx].lastMessageTime = m.timestamp || new Date().toISOString()
         const updated = chats.value.splice(chatIdx, 1)[0]
         chats.value.unshift(updated)
       } else {
-        loadChats() // chat novo — recarregar lista
+        // Chat NOVO (número nunca visto) → adicionar ao topo IMEDIATAMENTE
+        // Não chamar loadChats() — é lento. Usar os dados do próprio evento.
+        const pushName = m.metadata?.pushName || m.push_name || null
+        const lojou = findLojouUser(phoneKey)
+        chats.value.unshift({
+          id: jid,
+          remote_jid: jid,
+          name: lojou
+            ? (lojou.full_name || lojou.firstname || lojou.name)
+            : (pushName || phoneKey),
+          phone_number: jid.split('@')[0],
+          lastMessage: m.content || '',
+          lastMessageTime: m.timestamp || new Date().toISOString(),
+          user_id: lojou?.id || null,
+          users: lojou ? {
+            id: lojou.id,
+            name: lojou.full_name || lojou.firstname || lojou.name,
+            balance: lojou.balance || 0,
+            status: lojou.status || 'active'
+          } : null
+        })
       }
     })
     .subscribe()
