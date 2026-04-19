@@ -196,6 +196,9 @@ export const useEvolution = () => {
   const parseChatItem = (ch: any): EvoChat | null => {
     const id = ch.id || ch.remoteJid || ch.jid || ''
     if (!id.includes('@s.whatsapp.net')) return null // ignorar grupos e outros
+    // Filtrar JIDs inválidos: número deve ter pelo menos 7 dígitos
+    const phoneDigits = id.split('@')[0].replace(/\D/g, '')
+    if (phoneDigits.length < 7) return null
 
     // lastMessage pode vir em vários formatos dependendo da versão da API
     const lm = ch.lastMessage || ch.last_message || null
@@ -269,34 +272,59 @@ export const useEvolution = () => {
   }
 
   // ── POST /chat/findMessages/{instance} — histórico de 1 contacto ─────────
-  // body: { where: { key: { remoteJid: "..." } }, limit: N }
-  const fetchHistory = async (remoteJid: string, limit = 80): Promise<EvoMessage[]> => {
+  // NOTA: o filtro remoteJid do Evolution tem bugs documentados (issue #1632).
+  // Estratégia: tentar com filtro (ambos formatos JID), fazer filtragem no cliente.
+  const fetchHistory = async (remoteJid: string, limit = 500): Promise<EvoMessage[]> => {
     const c = await makeClient()
     if (!c) return []
 
-    // Garantir formato JID correcto: 258XXXXXXXXX@s.whatsapp.net
-    const digits = String(remoteJid).replace(/\D/g, '').replace(/@.*$/, '')
-    const jid = digits + '@s.whatsapp.net'
+    // Construir os dois formatos possíveis de JID (com e sem prefixo 258)
+    const rawDigits = String(remoteJid).replace(/\D/g, '').replace(/@.*$/, '')
+    // Remover 258 para obter número local de 9 dígitos
+    const localDigits = rawDigits.startsWith('258') && rawDigits.length > 9 ? rawDigits.slice(3) : rawDigits
+    const jidWith    = '258' + localDigits + '@s.whatsapp.net' // ex: 258855253617@s.whatsapp.net
+    const jidWithout = localDigits + '@s.whatsapp.net'          // ex: 855253617@s.whatsapp.net
 
-    // Corpo correcto conforme documentação oficial
-    const body = {
-      where: { key: { remoteJid: jid } },
-      limit
-    }
+    const allRaw: any[] = []
 
-    try {
-      const res = await c.http.post(`/chat/findMessages/${c.instance}`, body)
-      const raw = extractRecords(res.data)
-      if (raw.length > 0) {
-        const parsed = raw.map(parseRecord).filter(Boolean) as EvoMessage[]
-        console.log(`[EVO] fetchHistory ${jid}: ${parsed.length} msgs (${parsed.filter(m => !m.fromMe).length} recebidas)`)
-        return parsed
+    // Tentar ambos os formatos de JID
+    for (const jid of [jidWith, jidWithout]) {
+      for (const body of [
+        { where: { key: { remoteJid: jid } }, limit },
+        { where: { remoteJid: jid },          limit },
+      ]) {
+        try {
+          const res = await c.http.post(`/chat/findMessages/${c.instance}`, body)
+          const raw = extractRecords(res.data)
+          if (raw.length > 0) {
+            allRaw.push(...raw)
+            break // formato funcionou para este JID, não tentar o próximo body
+          }
+        } catch (_) {}
       }
-    } catch (e: any) {
-      console.warn('[EVO] findMessages falhou:', e?.response?.status, e?.message)
     }
 
-    return []
+    if (allRaw.length === 0) return []
+
+    // Parsear e deduplicar por ID da mensagem
+    const seen = new Set<string>()
+    const parsed: EvoMessage[] = []
+    for (const r of allRaw) {
+      const m = parseRecord(r)
+      if (!m || !m.evoId || seen.has(m.evoId)) continue
+      // Filtro client-side: garantir que a mensagem é deste contacto
+      const msgDigits = m.remoteJid.replace(/\D/g, '').replace(/@.*$/, '')
+      const msgLocal = msgDigits.startsWith('258') && msgDigits.length > 9 ? msgDigits.slice(3) : msgDigits
+      if (msgLocal !== localDigits) continue // mensagem de outro JID — ignorar
+      seen.add(m.evoId)
+      parsed.push(m)
+    }
+
+    // Ordenar por timestamp ASC (mais antigas primeiro) para exibição correcta
+    parsed.sort((a, b) => a.timestamp - b.timestamp)
+
+    console.log(`[EVO] fetchHistory ${jidWith}: ${parsed.length} msgs (${parsed.filter(m => !m.fromMe).length} recebidas)`)
+    return parsed
   }
 
   // ── Sidebar: chats + última mensagem de cada um ───────────────────────────

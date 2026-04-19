@@ -285,13 +285,14 @@ const selectContact = async (contact: any) => {
   if (!jid) return
 
   messagesStore.clearJid(jid)
-  await loadMessages(jid) // carrega do Evolution
+  await loadMessages(jid) // carga inicial do Evolution
 
-  // Poll a cada 12s para captar novas mensagens (Evolution como fonte)
+  // Poll a cada 15s: recarrega mensagens (Evolution como fonte)
+  // Não é spam porque fetchHistory agora tem limit=500 e filtra no cliente
   pollTimer = setInterval(async () => {
     if (!activeContact.value) return
     await loadMessages(activeContact.value.remote_jid)
-  }, 12000)
+  }, 15000)
 }
 
 // ── Computed ──────────────────────────────────────────────────────────────────
@@ -321,6 +322,31 @@ const onSendText = async (content: string, quotedId?: string) => {
     const res = await evo.sendText(phone, finalContent, quotedId)
     const realId = res?.key?.id || res?.id
     if (realId) messagesStore.confirmOutgoing(localId, jid, realId)
+
+    // Garantir que este chat existe na sidebar (importante para números novos)
+    const phoneKey = normalizePhone(jid.split('@')[0])
+    const exists = chats.value.some(c => normalizePhone(c.remote_jid?.split('@')[0] || '') === phoneKey)
+    if (!exists) {
+      const lojou = findLojouUser(phoneKey)
+      chats.value.unshift({
+        id: jid, remote_jid: jid,
+        name: lojou ? (lojou.full_name || lojou.firstname || lojou.name) : phone,
+        phone_number: jid.split('@')[0],
+        lastMessage: finalContent,
+        lastMessageTime: new Date().toISOString(),
+        user_id: lojou?.id || null,
+        users: lojou ? { id: lojou.id, name: lojou.full_name || lojou.firstname || lojou.name, balance: lojou.balance || 0, status: lojou.status || 'active' } : null
+      })
+    } else {
+      // Actualizar última mensagem na sidebar
+      const idx = chats.value.findIndex(c => normalizePhone(c.remote_jid?.split('@')[0] || '') === phoneKey)
+      if (idx >= 0) {
+        chats.value[idx].lastMessage = finalContent
+        chats.value[idx].lastMessageTime = new Date().toISOString()
+        const updated = chats.value.splice(idx, 1)[0]
+        chats.value.unshift(updated)
+      }
+    }
   } catch (err: any) {
     console.error('[SEND TEXT]', err?.response?.data || err?.message)
     messagesStore.updateStatus(localId, 'error')
