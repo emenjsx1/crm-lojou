@@ -272,46 +272,42 @@ export const useEvolution = () => {
   }
 
   // ── POST /chat/findMessages/{instance} — histórico de 1 contacto ─────────
-  // Bug documentado (issue #1632): filtro remoteJid no servidor não é fiável.
-  // Solução: buscar sem filtro (todas as mensagens) e filtrar 100% no cliente.
+  // PROBLEMA CONFIRMADO: filtro server-side por remoteJid retorna só msgs enviadas.
+  // As mensagens RECEBIDAS ficam de fora quando usamos where filter.
+  // SOLUÇÃO: buscar SEMPRE sem filtro (todas as msgs), filtrar 100% no cliente.
   const fetchHistory = async (remoteJid: string): Promise<EvoMessage[]> => {
     const c = await makeClient()
     if (!c) return []
 
-    // Número local sem prefixo 258 (para comparação robusta)
+    // Normalizar número alvo (sem 258, sem @, só dígitos)
     const rawDigits = String(remoteJid).replace(/\D/g, '').replace(/@.*$/, '')
     const localDigits = rawDigits.startsWith('258') && rawDigits.length > 9
       ? rawDigits.slice(3) : rawDigits
 
-    const jidWith    = '258' + localDigits + '@s.whatsapp.net'
-    const jidWithout = localDigits + '@s.whatsapp.net'
+    const jidDisplay = '258' + localDigits + '@s.whatsapp.net'
 
+    // ── Buscar SEM filtro — retorna enviadas E recebidas ──────────────────────
+    // O filtro server-side quebra as mensagens recebidas (bug Evolution #1632)
     let allRaw: any[] = []
 
-    // Tentativa 1: com filtro específico (mais eficiente — funciona em alguns servidores)
-    for (const jid of [jidWith, jidWithout]) {
+    // Tentar múltiplos limites para ter histórico suficiente
+    for (const limit of [200, 500]) {
       try {
-        const res = await c.http.post(`/chat/findMessages/${c.instance}`, {
-          where: { key: { remoteJid: jid } },
-          limit: 100
-        })
+        const res = await c.http.post(`/chat/findMessages/${c.instance}`, { limit })
         const raw = extractRecords(res.data)
-        allRaw.push(...raw)
+        if (raw.length > 0) {
+          allRaw = raw
+          break
+        }
       } catch (_) {}
     }
 
-    // Tentativa 2: sem filtro — busca TODAS as mensagens e filtra no cliente
-    // (workaround oficial para issue #1632)
     if (allRaw.length === 0) {
-      try {
-        const res = await c.http.post(`/chat/findMessages/${c.instance}`, { limit: 500 })
-        allRaw = extractRecords(res.data)
-      } catch (_) {}
+      console.warn(`[EVO] fetchHistory: nenhuma mensagem retornada para ${jidDisplay}`)
+      return []
     }
 
-    if (allRaw.length === 0) return []
-
-    // Filtrar no cliente: só mensagens deste número (qualquer formato de JID)
+    // ── Filtrar no cliente: aceitar qualquer formato de JID para este número ──
     const seen = new Set<string>()
     const parsed: EvoMessage[] = []
 
@@ -319,23 +315,24 @@ export const useEvolution = () => {
       const m = parseRecord(r)
       if (!m || !m.evoId || seen.has(m.evoId)) continue
 
-      // Normalizar JID da mensagem e comparar com o número alvo
-      const msgRaw = m.remoteJid.replace(/\D/g, '').replace(/@.*$/, '')
-      const msgLocal = msgRaw.startsWith('258') && msgRaw.length > 9 ? msgRaw.slice(3) : msgRaw
-      if (msgLocal !== localDigits) continue
+      // Normalizar JID da mensagem (strip 258, strip @, só dígitos locais)
+      const msgDigits = m.remoteJid.replace(/\D/g, '').replace(/@.*$/, '')
+      const msgLocal = msgDigits.startsWith('258') && msgDigits.length > 9
+        ? msgDigits.slice(3) : msgDigits
+
+      if (msgLocal !== localDigits) continue // mensagem de outro contacto
 
       seen.add(m.evoId)
       parsed.push(m)
     }
 
-    // Ordenar ASC (mais antigas → mais recentes) para exibição correcta
+    // Ordenar do mais antigo para o mais recente
     parsed.sort((a, b) => a.timestamp - b.timestamp)
 
+    const sent     = parsed.filter(m => m.fromMe)
     const received = parsed.filter(m => !m.fromMe)
-    console.log(`[EVO] fetchHistory ${jidWith}: ${parsed.length} msgs | ↑${parsed.length - received.length} enviadas | ↓${received.length} recebidas`)
-    if (received.length > 0) {
-      console.log('[EVO] Amostra recebidas:', received.slice(-3).map(m => ({ content: m.content, type: m.type, ts: new Date(m.timestamp).toLocaleTimeString() })))
-    }
+    console.log(`[EVO] fetchHistory ${jidDisplay}: ${parsed.length} msgs | ↑ ${sent.length} enviadas | ↓ ${received.length} recebidas`)
+
     return parsed
   }
 
