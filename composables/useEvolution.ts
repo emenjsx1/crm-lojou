@@ -352,9 +352,42 @@ export const useEvolution = () => {
     throw lastErr
   }
 
+  // ── Buscar mensagens recentes de TODOS os JIDs (para popular sidebar) ───────
+  const fetchAllRecent = async (limit = 200): Promise<EvoMessage[]> => {
+    const c = await makeClient()
+    if (!c) return []
+
+    // Tenta GET sem filtro de JID — retorna as últimas N mensagens de todas as conversas
+    const attempts = [
+      () => c.http.post(`/chat/findMessages/${c.instance}`, { where: {}, limit }),
+      () => c.http.post(`/chat/findMessages/${c.instance}`, { limit }),
+      () => c.http.get(`/chat/findMessages/${c.instance}`, { params: { limit } })
+    ]
+
+    for (const attempt of attempts) {
+      try {
+        const res = await attempt()
+        const data = res.data
+        const raw: any[] = data?.messages?.records
+          || data?.messages
+          || data?.records
+          || (Array.isArray(data) ? data : [])
+        if (Array.isArray(raw) && raw.length > 0) {
+          const parsed = raw.map(parseRecord).filter(Boolean) as EvoMessage[]
+          console.log(`[EVO] fetchAllRecent: ${parsed.length} mensagens de ${new Set(parsed.map(m => m.remoteJid)).size} JIDs`)
+          return parsed
+        }
+      } catch (e: any) {
+        // silencioso — endpoint pode não existir sem filtro
+      }
+    }
+    return []
+  }
+
   return {
     formatPhone,
     fetchHistory,
+    fetchAllRecent,
     fetchChats,
     sendText,
     sendMedia,
