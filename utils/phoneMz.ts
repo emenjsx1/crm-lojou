@@ -41,7 +41,7 @@ export function normalizeLojouPhoneKey(raw: string | null | undefined): string {
 /** Mesma chave que normalizeLojouPhoneKey (alias histórico server/contacts) */
 export const normalizePhone = normalizeLojouPhoneKey
 
-/** Termos para pesquisar na API admin (vários formatos) */
+/** Termos para pesquisar na API admin (vários formatos) — primeiro o formato da Lojou (9 dígitos). */
 export function collectLojouPhoneSearchTerms(raw: string | null | undefined): string[] {
   const d = digitsOnly(raw)
   const local = normalizeLojouPhoneKey(raw)
@@ -50,17 +50,42 @@ export function collectLojouPhoneSearchTerms(raw: string | null | undefined): st
     const x = String(t).trim()
     if (x.length >= 7 && !terms.includes(x)) terms.push(x)
   }
-  if (d) add(d)
+  // 1) Chave nacional (como na lista Contactos: 855253617) — a API costuma casar melhor
   if (local) {
     add(local)
     if (local.length === 9 && local.startsWith('8')) add(`258${local}`)
   }
-  // últimos 9 dígitos (útil se vier lixo à frente/trás)
+  // 2) Dígitos completos (ex.: 258855253617)
+  if (d) add(d)
+  // 3) Últimos 9 se forem 8… (prefixo estranho à frente)
   if (d.length > 9) {
     const tail = d.slice(-9)
     if (tail.startsWith('8')) add(tail)
   }
   return terms
+}
+
+/** Possíveis campos de telefone no JSON da API Lojou */
+export function lojouUserPhoneCandidates(user: any): string[] {
+  if (!user || typeof user !== 'object') return []
+  const m = user.metadata || {}
+  const vals = [
+    user.phone_number,
+    user.phone,
+    user.mobile_number,
+    user.mobile,
+    user.whatsapp,
+    user.whatsapp_number,
+    user.tel,
+    user.telephone,
+    m.phone,
+    m.phone_number,
+    m.mobile,
+    m.whatsapp
+  ]
+    .filter((v) => v !== null && v !== undefined && String(v).trim() !== '')
+    .map((v) => String(v))
+  return [...new Set(vals)]
 }
 
 /** Match entre número WhatsApp e número perfil Lojou */
@@ -70,6 +95,11 @@ export function phonesMatchLoJou(a: string | null | undefined, b: string | null 
   if (ka && kb && ka === kb) return true
   const da = digitsOnly(a)
   const db = digitsOnly(b)
+  if (!da || !db) return false
+  // Comparar sempre também a chave normalizada dos dígitos completos (258… vs 9 dígitos)
+  const ka2 = normalizeLojouPhoneKey(da)
+  const kb2 = normalizeLojouPhoneKey(db)
+  if (ka2 && kb2 && ka2 === kb2) return true
   if (da.length >= 9 && db.length >= 9) {
     const ta = da.slice(-9)
     const tb = db.slice(-9)

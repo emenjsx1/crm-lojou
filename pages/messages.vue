@@ -122,7 +122,7 @@ import type { Message } from '~/stores/messages'
 import { useApi } from '~/composables/useApi'
 import { useEvolution } from '~/composables/useEvolution'
 import { useSupabaseClient } from '#imports'
-import { normalizePhone, phonesMatchLoJou } from '~/utils/phoneMz'
+import { lojouUserPhoneCandidates, normalizePhone, phonesMatchLoJou } from '~/utils/phoneMz'
 
 const contactsStore = useContactStore()
 const messagesStore = useMessageStore()
@@ -169,10 +169,9 @@ const getContactPhone = (contact: any): string =>
 const findLojouUser = (jidPhone: string) => {
   const local = normalizePhone(String(jidPhone))
   if (!local || local.length < 7) return null
-  return contactsStore.contacts.find((c: any) => {
-    const raw = c.phone_number || c.mobile_number || c.phone || ''
-    return phonesMatchLoJou(jidPhone, raw) || phonesMatchLoJou(local, raw)
-  }) || null
+  return contactsStore.contacts.find((c: any) =>
+    lojouUserPhoneCandidates(c).some((p) => phonesMatchLoJou(jidPhone, p))
+  ) || null
 }
 
 // ── Normalizar JID para forma canónica (sempre com 258 para Moçambique) ───────

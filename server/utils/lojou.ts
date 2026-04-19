@@ -6,11 +6,12 @@ import { useRuntimeConfig } from '#imports'
 import {
   collectLojouPhoneSearchTerms,
   digitsOnly,
+  lojouUserPhoneCandidates,
   normalizePhone,
   phonesMatchLoJou
 } from '~/utils/phoneMz'
 
-export { normalizePhone, normalizeLojouPhoneKey, collectLojouPhoneSearchTerms, phonesMatchLoJou, digitsOnly } from '~/utils/phoneMz'
+export { normalizePhone, normalizeLojouPhoneKey, collectLojouPhoneSearchTerms, phonesMatchLoJou, digitsOnly, lojouUserPhoneCandidates } from '~/utils/phoneMz'
 
 export interface LojouLookupUser {
   id: string
@@ -120,21 +121,33 @@ export const lookupLojouUserByPhone = async (
       return { found: false, user: null, authSource: auth.source, error: 'invalid_phone' }
     }
 
-    let match: any = null
+    const extractUsersList = (data: any): any[] => {
+      if (!data) return []
+      if (Array.isArray(data)) return data
+      if (Array.isArray(data.users)) return data.users
+      if (Array.isArray(data.data)) return data.data
+      return []
+    }
 
+    // União de todos os resultados das pesquisas (a API pode não devolver o user num termo mas noutro)
+    const seen = new Map<string, any>()
     for (const term of searchTerms) {
       const response = await axios.get('https://api.lojou.app/api/admin/users', {
-        params: { search: term, is_paginate: 0 },
+        params: { search: term, is_paginate: 0, per_page: 250 },
         headers: { Authorization: `Bearer ${auth.token}` },
-        timeout: 8000
+        timeout: 12000
       })
-
-      const users: any[] = response.data?.users || response.data?.data || []
-      match = users.find((user: any) =>
-        phonesMatchLoJou(rawPhone, user.phone_number || user.phone || user.mobile_number)
-      ) || null
-      if (match) break
+      const users = extractUsersList(response.data)
+      for (const u of users) {
+        const id = String(u?.id ?? '')
+        if (id) seen.set(id, u)
+      }
     }
+
+    const merged = [...seen.values()]
+    const match = merged.find((user: any) =>
+      lojouUserPhoneCandidates(user).some((p) => phonesMatchLoJou(rawPhone, p))
+    ) || null
 
     if (!match) {
       return { found: false, user: null, authSource: auth.source }
