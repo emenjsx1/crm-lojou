@@ -90,7 +90,7 @@
                     {{ (user.full_name || user.firstname || user.name || 'Sem nome').toLowerCase() }}
                   </h4>
                   <p class="text-xs text-zinc-500 truncate mt-0.5">
-                    {{ user.phone_number || user.email || `ID: ${user.id}` }}
+                    {{ user.phone_number || user.mobile_number || user.email || `ID: ${user.id}` }}
                   </p>
                 </div>
               </div>
@@ -122,7 +122,7 @@ import type { Message } from '~/stores/messages'
 import { useApi } from '~/composables/useApi'
 import { useEvolution } from '~/composables/useEvolution'
 import { useSupabaseClient } from '#imports'
-import { lojouUserPhoneCandidates, normalizePhone, phonesMatchLoJou } from '~/utils/phoneMz'
+import { lojouApiDisplayName, lojouUserPhoneCandidates, normalizePhone, phonesMatchLoJou } from '~/utils/phoneMz'
 
 const contactsStore = useContactStore()
 const messagesStore = useMessageStore()
@@ -158,12 +158,12 @@ const buildJid = (raw: string | null | undefined): string => {
 const getContactJid = (contact: any): string => {
   const jid = String(contact?.remote_jid || '')
   if (jid.includes('@')) return jid
-  const phone = String(contact?.phone_number || contact?.phone || contact?.whatsapp || '')
+  const phone = String(contact?.phone_number || contact?.mobile_number || contact?.phone || contact?.whatsapp || '')
   return buildJid(phone)
 }
 
 const getContactPhone = (contact: any): string =>
-  String(contact?.phone_number || contact?.phone || contact?.whatsapp || '')
+  String(contact?.phone_number || contact?.mobile_number || contact?.phone || contact?.whatsapp || '')
 
 // ── Match com Lojou (9 dígitos nacionais, +258, 58… sem 2, etc.) ─────────────
 const findLojouUser = (jidPhone: string) => {
@@ -632,7 +632,7 @@ watch(globalSearchQuery, (q) => {
       searchResults.value = contactsStore.contacts.filter((c: any) =>
         (c.full_name || c.name || '').toLowerCase().includes(q2) ||
         (c.email || '').toLowerCase().includes(q2) ||
-        (c.phone_number || '').includes(q2)
+        (c.phone_number || c.mobile_number || '').includes(q2)
       )
     } finally {
       searchLoading.value = false
@@ -666,9 +666,11 @@ const getInitials = (name: string) => {
 const startConversationWith = (user: any) => {
   showSearchModal.value = false
   globalSearchQuery.value = ''
-  const phoneRaw = String(user.phone_number || user.phone || user.mobile_number || '').trim()
+  const phoneRaw = String(
+    lojouUserPhoneCandidates(user)[0] || user.phone_number || user.mobile_number || user.phone || ''
+  ).trim()
   const uid = user.id != null && user.id !== '' ? String(user.id) : null
-  const displayName = user.full_name || user.firstname || user.name || phoneRaw
+  const displayName = lojouApiDisplayName(user) || phoneRaw
 
   const payload: Record<string, any> = {
     ...user,

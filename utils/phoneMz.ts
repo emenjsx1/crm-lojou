@@ -65,14 +65,17 @@ export function collectLojouPhoneSearchTerms(raw: string | null | undefined): st
   return terms
 }
 
-/** Possíveis campos de telefone no JSON da API Lojou */
+/**
+ * Telefones possíveis no objecto user da Lojou (admin/users).
+ * Ex.: phone_number, mobile_number (ambos "875702435"), metadata aninhado.
+ */
 export function lojouUserPhoneCandidates(user: any): string[] {
   if (!user || typeof user !== 'object') return []
   const m = user.metadata || {}
   const vals = [
     user.phone_number,
-    user.phone,
     user.mobile_number,
+    user.phone,
     user.mobile,
     user.whatsapp,
     user.whatsapp_number,
@@ -80,12 +83,25 @@ export function lojouUserPhoneCandidates(user: any): string[] {
     user.telephone,
     m.phone,
     m.phone_number,
+    m.mobile_number,
     m.mobile,
     m.whatsapp
   ]
     .filter((v) => v !== null && v !== undefined && String(v).trim() !== '')
     .map((v) => String(v))
   return [...new Set(vals)]
+}
+
+/**
+ * Nome para UI — mesmo formato que a API devolve (full_name, firstname+lastname, …).
+ */
+export function lojouApiDisplayName(user: any): string {
+  if (!user || typeof user !== 'object') return ''
+  const full = String(user.full_name || '').trim()
+  if (full) return full
+  const fn = [user.firstname, user.lastname].map((p: any) => String(p || '').trim()).filter(Boolean)
+  if (fn.length) return fn.join(' ')
+  return String(user.name || user.email || lojouUserPhoneCandidates(user)[0] || '').trim() || 'Sem nome'
 }
 
 /** Match entre número WhatsApp e número perfil Lojou */

@@ -91,7 +91,7 @@ const filteredContacts = computed(() => {
   const q = searchQuery.value.toLowerCase()
   return props.contacts.filter(c => {
     const name = (c.full_name || c.firstname || c.name || '').toLowerCase()
-    const phone = (c.phone_number || '').toLowerCase()
+    const phone = (c.phone_number || c.mobile_number || '').toLowerCase()
     return name.includes(q) || phone.includes(q)
   })
 })

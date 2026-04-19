@@ -6,12 +6,13 @@ import { useRuntimeConfig } from '#imports'
 import {
   collectLojouPhoneSearchTerms,
   digitsOnly,
+  lojouApiDisplayName,
   lojouUserPhoneCandidates,
   normalizePhone,
   phonesMatchLoJou
 } from '~/utils/phoneMz'
 
-export { normalizePhone, normalizeLojouPhoneKey, collectLojouPhoneSearchTerms, phonesMatchLoJou, digitsOnly, lojouUserPhoneCandidates } from '~/utils/phoneMz'
+export { normalizePhone, normalizeLojouPhoneKey, collectLojouPhoneSearchTerms, phonesMatchLoJou, digitsOnly, lojouUserPhoneCandidates, lojouApiDisplayName } from '~/utils/phoneMz'
 
 export interface LojouLookupUser {
   id: string
@@ -160,7 +161,7 @@ export const lookupLojouUserByPhone = async (
       authSource: auth.source,
       user: {
         id: String(match.id),
-        name: match.full_name || match.name || match.firstname || normalized,
+        name: lojouApiDisplayName(match) || normalized,
         phone: displayPhone,
         balance: match.balance ?? 0,
         status: match.status ?? 'active',

@@ -14,6 +14,12 @@ export interface Contact {
   created_at?: string
   last_access_at?: string
   
+  // Campos típicos do JSON admin/users Lojou
+  full_name?: string
+  firstname?: string
+  lastname?: string
+  phone_number?: string
+  mobile_number?: string
   // Retrocompatibilidade opcional com nossos filtros criados
   phone?: string
   verified?: boolean

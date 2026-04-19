@@ -444,7 +444,7 @@ const contactPhone = computed(() => {
   // Preferir remote_jid (mais fiável), senão phone convencional
   const jid = props.contact.remote_jid
   if (jid) return jid.split('@')[0]
-  return props.contact.phone_number || props.contact.phone || props.contact.whatsapp || null
+  return props.contact.phone_number || props.contact.mobile_number || props.contact.phone || props.contact.whatsapp || null
 })
 
 const formattedPhone = computed(() => {
