@@ -1,5 +1,6 @@
 import axios from 'axios'
 import { useSupabaseClient } from '#imports'
+import { digitsOnly, normalizeLojouPhoneKey } from '~/utils/phoneMz'
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Evolution API — Composable oficial
@@ -40,12 +41,11 @@ export interface EvoChat {
 export const useEvolution = () => {
   const clientSupabase = useSupabaseClient()
 
-  // ── Normalização de número (Moçambique) ──────────────────────────────────
+  // ── Normalização de número (Moçambique) — alinhado a utils/phoneMz ───────
   const formatPhone = (raw: string): string => {
-    let d = String(raw).replace(/\D/g, '')
-    if (d.startsWith('258') && d.length > 9) d = d.slice(3)
-    if (d.length === 9 && d.startsWith('8')) return '258' + d
-    return d
+    const local = normalizeLojouPhoneKey(raw)
+    if (local && local.length === 9 && local.startsWith('8')) return `258${local}`
+    return digitsOnly(raw)
   }
 
   // ── Credenciais ──────────────────────────────────────────────────────────
@@ -279,13 +279,6 @@ export const useEvolution = () => {
     return []
   }
 
-  /** Dígitos “locais” MZ (9 dígitos tipo 8…) para comparar contactos, com ou sem 258. */
-  const toLocalDigits = (digits: string): string => {
-    const d = String(digits || '').replace(/\D/g, '')
-    if (d.startsWith('258') && d.length > 9) return d.slice(3)
-    return d
-  }
-
   // ── POST /chat/findMessages/{instance} — histórico de 1 contacto ─────────
   // PROBLEMA CONFIRMADO: filtro server-side por remoteJid retorna só msgs enviadas.
   // As mensagens RECEBIDAS ficam de fora quando usamos where filter.
@@ -309,7 +302,7 @@ export const useEvolution = () => {
 
     // Normalizar número alvo (sem 258, sem @, só dígitos)
     const rawDigits = String(remoteJid).replace(/\D/g, '').replace(/@.*$/, '')
-    const localDigits = toLocalDigits(rawDigits)
+    const localDigits = normalizeLojouPhoneKey(rawDigits)
 
     const jidDisplay = '258' + localDigits + '@s.whatsapp.net'
 
@@ -336,7 +329,7 @@ export const useEvolution = () => {
       if (!m || !m.evoId || seen.has(m.evoId)) continue
 
       const msgDigits = m.remoteJid.replace(/\D/g, '').replace(/@.*$/, '')
-      const msgLocal = toLocalDigits(msgDigits)
+      const msgLocal = normalizeLojouPhoneKey(msgDigits)
 
       if (msgLocal !== localDigits) continue // mensagem de outro contacto
 
@@ -377,7 +370,7 @@ export const useEvolution = () => {
     // Por número normalizado, manter só a mensagem mais recente (enviada ou recebida)
     const best = new Map<string, EvoMessage>()
     for (const m of fromPool) {
-      const local = toLocalDigits(m.remoteJid.split('@')[0] || '')
+      const local = normalizeLojouPhoneKey(m.remoteJid.split('@')[0] || '')
       if (local.length < 7) continue
       const cur = best.get(local)
       if (!cur || m.timestamp > cur.timestamp) best.set(local, m)
@@ -385,7 +378,7 @@ export const useEvolution = () => {
 
     // Incluir chats da API que ainda não apareceram no pool (ex.: só antigas fora do limit)
     for (const ch of chatList) {
-      const local = toLocalDigits(ch.id.split('@')[0] || '')
+      const local = normalizeLojouPhoneKey(ch.id.split('@')[0] || '')
       if (local.length < 7) continue
       const pseudo: EvoMessage = {
         evoId:     `sidebar_${ch.id}`,

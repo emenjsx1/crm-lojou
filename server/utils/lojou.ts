@@ -3,6 +3,14 @@ import { createClient } from '@supabase/supabase-js'
 import type { H3Event } from 'h3'
 import { getCookie } from 'h3'
 import { useRuntimeConfig } from '#imports'
+import {
+  collectLojouPhoneSearchTerms,
+  digitsOnly,
+  normalizePhone,
+  phonesMatchLoJou
+} from '~/utils/phoneMz'
+
+export { normalizePhone, normalizeLojouPhoneKey, collectLojouPhoneSearchTerms, phonesMatchLoJou, digitsOnly } from '~/utils/phoneMz'
 
 export interface LojouLookupUser {
   id: string
@@ -20,14 +28,6 @@ export interface LojouLookupResult {
   error?: string | null
 }
 
-export const normalizePhone = (raw: string | null | undefined) => {
-  let digits = String(raw || '').trim().replace(/\D/g, '')
-  if (digits.startsWith('258') && digits.length > 9) {
-    digits = digits.slice(3)
-  }
-  return digits
-}
-
 export const normalizeRemoteJid = (raw: string | null | undefined) => {
   const value = String(raw || '').trim()
   if (!value.includes('@s.whatsapp.net')) {
@@ -43,10 +43,13 @@ export const normalizeRemoteJid = (raw: string | null | undefined) => {
 }
 
 export const buildRemoteJid = (rawPhone: string | null | undefined) => {
-  const digits = String(rawPhone || '').replace(/\D/g, '')
-  if (!digits) return ''
-  const full = digits.length === 9 && digits.startsWith('8') ? `258${digits}` : digits
-  return `${full}@s.whatsapp.net`
+  const local = normalizePhone(rawPhone)
+  if (local && local.length === 9 && local.startsWith('8')) {
+    return `258${local}@s.whatsapp.net`
+  }
+  const d = digitsOnly(rawPhone)
+  if (!d) return ''
+  return `${d}@s.whatsapp.net`
 }
 
 export const createServerSupabase = () => {
@@ -100,9 +103,9 @@ export const lookupLojouUserByPhone = async (
   rawPhone: string
 ): Promise<LojouLookupResult> => {
   const normalized = normalizePhone(rawPhone)
-  const fullPhone = String(rawPhone || '').replace(/\D/g, '')
+  const fullPhoneDigits = digitsOnly(rawPhone)
 
-  if (!normalized) {
+  if (!normalized && !fullPhoneDigits) {
     return { found: false, user: null, authSource: null, error: 'invalid_phone' }
   }
 
@@ -112,7 +115,11 @@ export const lookupLojouUserByPhone = async (
   }
 
   try {
-    const searchTerms = [normalized, fullPhone].filter(Boolean)
+    const searchTerms = collectLojouPhoneSearchTerms(rawPhone)
+    if (searchTerms.length === 0) {
+      return { found: false, user: null, authSource: auth.source, error: 'invalid_phone' }
+    }
+
     let match: any = null
 
     for (const term of searchTerms) {
@@ -123,7 +130,9 @@ export const lookupLojouUserByPhone = async (
       })
 
       const users: any[] = response.data?.users || response.data?.data || []
-      match = users.find((user: any) => normalizePhone(user.phone_number || user.phone) === normalized) || null
+      match = users.find((user: any) =>
+        phonesMatchLoJou(rawPhone, user.phone_number || user.phone || user.mobile_number)
+      ) || null
       if (match) break
     }
 
@@ -131,13 +140,15 @@ export const lookupLojouUserByPhone = async (
       return { found: false, user: null, authSource: auth.source }
     }
 
+    const displayPhone = fullPhoneDigits || buildRemoteJid(normalized).split('@')[0]
+
     return {
       found: true,
       authSource: auth.source,
       user: {
         id: String(match.id),
         name: match.full_name || match.name || match.firstname || normalized,
-        phone: fullPhone || buildRemoteJid(normalized).split('@')[0],
+        phone: displayPhone,
         balance: match.balance ?? 0,
         status: match.status ?? 'active',
         metadata: match

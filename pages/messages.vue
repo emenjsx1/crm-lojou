@@ -122,6 +122,7 @@ import type { Message } from '~/stores/messages'
 import { useApi } from '~/composables/useApi'
 import { useEvolution } from '~/composables/useEvolution'
 import { useSupabaseClient } from '#imports'
+import { normalizePhone, phonesMatchLoJou } from '~/utils/phoneMz'
 
 const contactsStore = useContactStore()
 const messagesStore = useMessageStore()
@@ -164,19 +165,14 @@ const getContactJid = (contact: any): string => {
 const getContactPhone = (contact: any): string =>
   String(contact?.phone_number || contact?.phone || contact?.whatsapp || '')
 
-// ── Normalizar phone para match (remove DDI 258) ─────────────────────────────
-const normalizePhone = (raw: string) => String(raw || '').replace(/\D/g, '').replace(/^258/, '')
-
-// ── Match com Lojou: retorna o utilizador Lojou ou null ─────────────────────
+// ── Match com Lojou (9 dígitos nacionais, +258, 58… sem 2, etc.) ─────────────
 const findLojouUser = (jidPhone: string) => {
-  const local = normalizePhone(String(jidPhone)) // ex: "855253617"
+  const local = normalizePhone(String(jidPhone))
   if (!local || local.length < 7) return null
-  const match = contactsStore.contacts.find((c: any) => {
+  return contactsStore.contacts.find((c: any) => {
     const raw = c.phone_number || c.mobile_number || c.phone || ''
-    const cp = normalizePhone(String(raw))
-    return cp.length >= 7 && cp === local
+    return phonesMatchLoJou(jidPhone, raw) || phonesMatchLoJou(local, raw)
   }) || null
-  return match
 }
 
 // ── Normalizar JID para forma canónica (sempre com 258 para Moçambique) ───────
@@ -515,7 +511,33 @@ const onDeleteMessage = async (msgId: string) => {
 }
 
 // ── User found (Lojou check) ──────────────────────────────────────────────────
-const onUserFound = (_userData: any) => { /* futuro */ }
+const onUserFound = (userData: any) => {
+  if (!userData?.id || !activeContact.value) return
+  const jid = canonicalJid(activeContact.value.remote_jid || getContactJid(activeContact.value))
+  const phoneKey = normalizePhone(jid.split('@')[0])
+
+  activeContact.value = {
+    ...activeContact.value,
+    user_id: userData.id,
+    name: userData.name || activeContact.value.name,
+    users: {
+      id: userData.id,
+      name: userData.name,
+      balance: userData.balance ?? 0,
+      status: userData.status || 'active'
+    }
+  }
+
+  const idx = chats.value.findIndex(c => normalizePhone(c.remote_jid?.split('@')[0] || '') === phoneKey)
+  if (idx >= 0) {
+    chats.value[idx] = {
+      ...chats.value[idx],
+      user_id: userData.id,
+      name: userData.name || chats.value[idx].name,
+      users: activeContact.value.users
+    }
+  }
+}
 
 // ── Assinatura ────────────────────────────────────────────────────────────────
 watch(agentSignature, (val) => {
