@@ -666,12 +666,30 @@ const getInitials = (name: string) => {
 const startConversationWith = (user: any) => {
   showSearchModal.value = false
   globalSearchQuery.value = ''
-  selectContact({
+  const phoneRaw = String(user.phone_number || user.phone || user.mobile_number || '').trim()
+  const uid = user.id != null && user.id !== '' ? String(user.id) : null
+  const displayName = user.full_name || user.firstname || user.name || phoneRaw
+
+  const payload: Record<string, any> = {
     ...user,
-    name: user.full_name || user.firstname || user.name,
-    phone_number: user.phone_number || user.phone,
-    remote_jid: buildJid(user.phone_number || user.phone)
-  })
+    id: uid || user.id || `search_${Date.now()}`,
+    name: displayName,
+    phone_number: phoneRaw,
+    remote_jid: buildJid(phoneRaw),
+    user_id: uid
+  }
+
+  // O ChatWindow só oculta o aviso «não cadastrado» se existir `users` (utilizador Lojou)
+  if (uid) {
+    payload.users = {
+      id: uid,
+      name: displayName,
+      balance: Number(user.balance) || 0,
+      status: String(user.status || 'active')
+    }
+  }
+
+  selectContact(payload)
 }
 
 const onNewChat = (phone: string) => {
