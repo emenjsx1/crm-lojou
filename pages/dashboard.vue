@@ -301,7 +301,7 @@ const fetchEvolutionStatus = async () => {
       try {
         const msgRes = await axios.post(
           `${evoUrl}/chat/findMessages/${evoInstance.value}`,
-          { where: { key: { fromMe: true } }, limit: 200 },
+          { limit: 500, where: {} },
           { headers: { apikey: evoKey, 'Content-Type': 'application/json' } }
         )
         const records: any[] = msgRes.data?.messages?.records || msgRes.data?.messages || msgRes.data || []
@@ -317,6 +317,7 @@ const fetchEvolutionStatus = async () => {
           }
 
           messagesFiltered.value = records.filter((m: any) => {
+            if (!m?.key?.fromMe) return false
             if (cutoff === 0) return true
             const ts = m.messageTimestamp ? m.messageTimestamp * 1000 : new Date(m.created_at).getTime()
             return ts >= cutoff

@@ -111,7 +111,16 @@ export const useEvolution = () => {
   }
 
   // ── Parsear mensagem do formato Evolution ────────────────────────────────
-  // Resposta de findMessages: { key: { remoteJid, fromMe, id }, message: {...}, messageTimestamp, status, pushName }
+  // Resposta de findMessages: { key: { remoteJid, remoteJidAlt, fromMe, id }, message: {...}, ... }
+  // Em contas recentes o WhatsApp pode usar @lid; o par @s.whatsapp.net costuma vir em remoteJidAlt.
+  const resolveChatJid = (key: any): string => {
+    if (!key) return ''
+    const primary = String(key.remoteJid || '')
+    const alt = String(key.remoteJidAlt || '')
+    if (primary.endsWith('@lid') && alt.includes('@s.whatsapp.net')) return alt
+    return primary || alt
+  }
+
   const parseRecord = (r: any): EvoMessage | null => {
     if (!r?.key) return null
 
@@ -166,11 +175,10 @@ export const useEvolution = () => {
         || '[Mensagem Interativa]'
     } else {
       const fallback = msg.text || msg.caption || msg.description
-      content = fallback || ''
-      if (!content) return null
+      content = (fallback && String(fallback)) || '[Mensagem]'
     }
 
-    const rawJid = r.key.remoteJid || ''
+    const rawJid = resolveChatJid(r.key)
     const ts = r.messageTimestamp
       ? (Number(r.messageTimestamp) > 1_000_000_000_000
           ? Number(r.messageTimestamp)
@@ -271,35 +279,47 @@ export const useEvolution = () => {
     return []
   }
 
+  /** Dígitos “locais” MZ (9 dígitos tipo 8…) para comparar contactos, com ou sem 258. */
+  const toLocalDigits = (digits: string): string => {
+    const d = String(digits || '').replace(/\D/g, '')
+    if (d.startsWith('258') && d.length > 9) return d.slice(3)
+    return d
+  }
+
   // ── POST /chat/findMessages/{instance} — histórico de 1 contacto ─────────
   // PROBLEMA CONFIRMADO: filtro server-side por remoteJid retorna só msgs enviadas.
   // As mensagens RECEBIDAS ficam de fora quando usamos where filter.
   // SOLUÇÃO: buscar SEMPRE sem filtro (todas as msgs), filtrar 100% no cliente.
-  const fetchHistory = async (remoteJid: string): Promise<EvoMessage[]> => {
+  // Ref: https://doc.evolution-api.com/v2/api-reference/chat-controller/find-messages
+  const fetchRawMessagePool = async (c: NonNullable<Awaited<ReturnType<typeof makeClient>>>, limit: number): Promise<any[]> => {
+    const bodies = [{ limit, where: {} }, { limit }]
+    for (const body of bodies) {
+      try {
+        const res = await c.http.post(`/chat/findMessages/${c.instance}`, body)
+        const raw = extractRecords(res.data)
+        if (raw.length > 0) return raw
+      } catch (_) { /* tenta próximo body */ }
+    }
+    return []
+  }
+
+  const fetchHistory = async (remoteJid: string, poolLimit = 500): Promise<EvoMessage[]> => {
     const c = await makeClient()
     if (!c) return []
 
     // Normalizar número alvo (sem 258, sem @, só dígitos)
     const rawDigits = String(remoteJid).replace(/\D/g, '').replace(/@.*$/, '')
-    const localDigits = rawDigits.startsWith('258') && rawDigits.length > 9
-      ? rawDigits.slice(3) : rawDigits
+    const localDigits = toLocalDigits(rawDigits)
 
     const jidDisplay = '258' + localDigits + '@s.whatsapp.net'
 
     // ── Buscar SEM filtro — retorna enviadas E recebidas ──────────────────────
-    // O filtro server-side quebra as mensagens recebidas (bug Evolution #1632)
+    // O filtro server-side quebra as mensagens recebidas (bug Evolution / Baileys)
     let allRaw: any[] = []
-
-    // Tentar múltiplos limites para ter histórico suficiente
-    for (const limit of [200, 500]) {
-      try {
-        const res = await c.http.post(`/chat/findMessages/${c.instance}`, { limit })
-        const raw = extractRecords(res.data)
-        if (raw.length > 0) {
-          allRaw = raw
-          break
-        }
-      } catch (_) {}
+    const tryLimits = [...new Set([Math.max(200, Math.min(poolLimit, 1000)), 200, 500])].sort((a, b) => b - a)
+    for (const limit of tryLimits) {
+      allRaw = await fetchRawMessagePool(c, limit)
+      if (allRaw.length > 0) break
     }
 
     if (allRaw.length === 0) {
@@ -315,10 +335,8 @@ export const useEvolution = () => {
       const m = parseRecord(r)
       if (!m || !m.evoId || seen.has(m.evoId)) continue
 
-      // Normalizar JID da mensagem (strip 258, strip @, só dígitos locais)
       const msgDigits = m.remoteJid.replace(/\D/g, '').replace(/@.*$/, '')
-      const msgLocal = msgDigits.startsWith('258') && msgDigits.length > 9
-        ? msgDigits.slice(3) : msgDigits
+      const msgLocal = toLocalDigits(msgDigits)
 
       if (msgLocal !== localDigits) continue // mensagem de outro contacto
 
@@ -336,23 +354,57 @@ export const useEvolution = () => {
     return parsed
   }
 
-  // ── Sidebar: chats + última mensagem de cada um ───────────────────────────
-  // Usa findChats para obter lista completa; para last message usa os dados do chat
-  const fetchAllRecent = async (_limit = 200): Promise<EvoMessage[]> => {
-    const chats = await fetchChats()
-    if (chats.length === 0) return []
+  // ── Sidebar: última actividade por contacto ────────────────────────────────
+  // findChats nem sempre reflecte recebidas recentes; o pool findMessages (sem where)
+  // inclui enviadas e recebidas. Fazemos merge com findChats para chats sem msg no pool.
+  const fetchAllRecent = async (poolLimit = 500): Promise<EvoMessage[]> => {
+    const c = await makeClient()
+    const chatList = await fetchChats()
 
-    // Converter EvoChat → EvoMessage (formato esperado pelo loadChats)
-    return chats.map(ch => ({
-      evoId:     `sidebar_${ch.id}`,
-      remoteJid: ch.id,
-      fromMe:    false,
-      content:   ch.lastMessage || '',
-      type:      'text' as const,
-      timestamp: ch.lastTimestamp || Date.now(),
-      status:    'DELIVERY_ACK',
-      pushName:  ch.name
-    }))
+    const fromPool: EvoMessage[] = []
+    if (c) {
+      const raw = await fetchRawMessagePool(c, poolLimit)
+      const seen = new Set<string>()
+      for (const r of raw) {
+        const m = parseRecord(r)
+        if (!m?.evoId || seen.has(m.evoId)) continue
+        if (!m.remoteJid.includes('@s.whatsapp.net')) continue
+        seen.add(m.evoId)
+        fromPool.push(m)
+      }
+    }
+
+    // Por número normalizado, manter só a mensagem mais recente (enviada ou recebida)
+    const best = new Map<string, EvoMessage>()
+    for (const m of fromPool) {
+      const local = toLocalDigits(m.remoteJid.split('@')[0] || '')
+      if (local.length < 7) continue
+      const cur = best.get(local)
+      if (!cur || m.timestamp > cur.timestamp) best.set(local, m)
+    }
+
+    // Incluir chats da API que ainda não apareceram no pool (ex.: só antigas fora do limit)
+    for (const ch of chatList) {
+      const local = toLocalDigits(ch.id.split('@')[0] || '')
+      if (local.length < 7) continue
+      const pseudo: EvoMessage = {
+        evoId:     `sidebar_${ch.id}`,
+        remoteJid: ch.id,
+        fromMe:    false,
+        content:   ch.lastMessage || '',
+        type:      'text',
+        timestamp: ch.lastTimestamp || Date.now(),
+        status:    'DELIVERY_ACK',
+        pushName:  ch.name
+      }
+      const cur = best.get(local)
+      if (!cur || pseudo.timestamp > cur.timestamp) best.set(local, pseudo)
+    }
+
+    const merged = [...best.values()]
+    merged.sort((a, b) => b.timestamp - a.timestamp)
+    console.log(`[EVO] fetchAllRecent: ${merged.length} conversas (pool ≤${poolLimit} msgs, ${fromPool.length} parseadas)`)
+    return merged
   }
 
   // ── POST /message/sendText/{instance} ────────────────────────────────────
@@ -421,7 +473,13 @@ export const useEvolution = () => {
     const c = await makeClient()
     if (!c) throw new Error('Evolution não configurado')
 
-    const events = ['MESSAGES_UPSERT', 'MESSAGES_UPDATE', 'MESSAGES_SET', 'SEND_MESSAGE']
+    const events = [
+      'MESSAGES_UPSERT',
+      'MESSAGES_UPDATE',
+      'MESSAGES_SET',
+      'MESSAGES_RECEIPT_UPDATE',
+      'SEND_MESSAGE'
+    ]
     const endpoints = [`/webhook/set/${c.instance}`, `/instance/setWebhook/${c.instance}`]
 
     let lastErr: any

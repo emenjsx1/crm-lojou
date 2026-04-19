@@ -48,7 +48,13 @@ async function configureWebhook(config: { url: string; key: string; instance: st
   const res = await http.post(`/instance/setWebhook/${config.instance}`, {
     url: webhookUrl,
     enabled: true,
-    events: ['MESSAGES_UPSERT', 'MESSAGES_UPDATE', 'MESSAGES_SET', 'SEND_MESSAGE']
+    events: [
+      'MESSAGES_UPSERT',
+      'MESSAGES_UPDATE',
+      'MESSAGES_SET',
+      'MESSAGES_RECEIPT_UPDATE',
+      'SEND_MESSAGE'
+    ]
   })
 
   return res.data
