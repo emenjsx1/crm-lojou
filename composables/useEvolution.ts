@@ -1,6 +1,20 @@
 import axios from 'axios'
 import { useSupabaseClient } from '#imports'
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Evolution API — Composable oficial
+//
+// Endpoints confirmados via source code (routes/chat.router.ts):
+//   POST /chat/findChats/{instance}     — lista todos os chats
+//   POST /chat/findMessages/{instance}  — lista mensagens (filtrado ou global)
+//   POST /chat/findContacts/{instance}  — lista contactos
+//   POST /message/sendText/{instance}   — enviar texto
+//   POST /message/sendMedia/{instance}  — enviar media
+//   POST /webhook/set/{instance}        — configurar webhook
+//
+// IMPORTANTE: todos os endpoints de query são POST, não GET.
+// ─────────────────────────────────────────────────────────────────────────────
+
 export interface EvoMessage {
   evoId: string
   remoteJid: string
@@ -16,8 +30,8 @@ export interface EvoMessage {
 }
 
 export interface EvoChat {
-  id: string          // remoteJid
-  name: string        // nome do contacto
+  id: string           // remoteJid canónico
+  name: string         // pushName ou número
   lastMessage?: string
   lastTimestamp?: number
   unreadCount?: number
@@ -84,14 +98,28 @@ export const useEvolution = () => {
     }
   }
 
+  // ── Extrair array de records de resposta da API ───────────────────────────
+  const extractRecords = (data: any): any[] => {
+    if (Array.isArray(data)) return data
+    if (Array.isArray(data?.messages?.records)) return data.messages.records
+    if (Array.isArray(data?.messages)) return data.messages
+    if (Array.isArray(data?.records)) return data.records
+    if (Array.isArray(data?.chats)) return data.chats
+    if (Array.isArray(data?.contacts)) return data.contacts
+    if (Array.isArray(data?.data)) return data.data
+    return []
+  }
+
   // ── Parsear mensagem do formato Evolution ────────────────────────────────
+  // Resposta de findMessages: { key: { remoteJid, fromMe, id }, message: {...}, messageTimestamp, status, pushName }
   const parseRecord = (r: any): EvoMessage | null => {
     if (!r?.key) return null
 
     let msg = r.message || {}
-    if (msg.ephemeralMessage) msg = msg.ephemeralMessage.message || {}
-    if (msg.viewOnceMessage) msg = msg.viewOnceMessage.message || {}
-    if (msg.viewOnceMessageV2) msg = msg.viewOnceMessageV2.message || {}
+    // Desembrulhar tipos especiais
+    if (msg.ephemeralMessage)   msg = msg.ephemeralMessage.message   || {}
+    if (msg.viewOnceMessage)    msg = msg.viewOnceMessage.message    || {}
+    if (msg.viewOnceMessageV2)  msg = msg.viewOnceMessageV2.message  || {}
 
     let type: EvoMessage['type'] = 'text'
     let content = ''
@@ -101,8 +129,8 @@ export const useEvolution = () => {
 
     if (msg.conversation) {
       content = msg.conversation
-    } else if (msg.extendedTextMessage) {
-      content = msg.extendedTextMessage.text || ''
+    } else if (msg.extendedTextMessage?.text) {
+      content = msg.extendedTextMessage.text
     } else if (msg.imageMessage) {
       type = 'image'
       caption = msg.imageMessage.caption || undefined
@@ -138,13 +166,11 @@ export const useEvolution = () => {
         || '[Mensagem Interativa]'
     } else {
       const fallback = msg.text || msg.caption || msg.description
-      if (fallback) content = fallback
-      else return null
+      content = fallback || ''
+      if (!content) return null
     }
 
-    // JID — normaliza mas NÃO filtra: aceitar qualquer formato
     const rawJid = r.key.remoteJid || ''
-
     const ts = r.messageTimestamp
       ? (Number(r.messageTimestamp) > 1_000_000_000_000
           ? Number(r.messageTimestamp)
@@ -152,82 +178,33 @@ export const useEvolution = () => {
       : Date.now()
 
     return {
-      evoId: r.key.id,
+      evoId:     r.key.id,
       remoteJid: rawJid,
-      fromMe: Boolean(r.key.fromMe),
+      fromMe:    Boolean(r.key.fromMe),
       content,
       type,
       timestamp: ts,
-      status: r.status || 'DELIVERY_ACK',
+      status:    r.status || 'DELIVERY_ACK',
       mediaUrl,
       mimeType,
       caption,
-      pushName: r.pushName || undefined
+      pushName:  r.pushName || undefined
     }
   }
 
-  // ── Buscar histórico de mensagens — Evolution direto ────────────────────
-  const fetchHistory = async (remoteJid: string, limit = 60): Promise<EvoMessage[]> => {
-    const c = await makeClient()
-    if (!c) return []
-
-    // Normaliza o JID para enviar à Evolution
-    const phone = String(remoteJid).replace(/\D/g, '')
-    const jid = phone.includes('@') ? phone : phone + '@s.whatsapp.net'
-
-    const attempts = [
-      // Formato v2 correto
-      () => c.http.post(`/chat/findMessages/${c.instance}`, {
-        where: { key: { remoteJid: jid } },
-        limit
-      }),
-      // Formato alternativo
-      () => c.http.post(`/chat/findMessages/${c.instance}`, {
-        where: { remoteJid: jid },
-        limit
-      }),
-      // GET endpoint
-      () => c.http.get(`/chat/findMessages/${c.instance}`, {
-        params: { remoteJid: jid, limit }
-      })
-    ]
-
-    for (const attempt of attempts) {
-      try {
-        const res = await attempt()
-        const data = res.data
-        const raw: any[] = data?.messages?.records
-          || data?.messages
-          || data?.records
-          || (Array.isArray(data) ? data : [])
-
-        if (Array.isArray(raw) && raw.length > 0) {
-          const parsed = raw.map(parseRecord).filter(Boolean) as EvoMessage[]
-          console.log(`[EVO] fetchHistory ${jid}: ${parsed.length} mensagens`)
-          return parsed
-        }
-      } catch (e: any) {
-        console.warn(`[EVO] fetchHistory tentativa falhou:`, e?.message)
-      }
-    }
-    return []
-  }
-
-  // ── Parsear raw chat/contact object para EvoChat ────────────────────────
-  const parseChatRaw = (ch: any): EvoChat | null => {
+  // ── Parsear chat/contacto para EvoChat ───────────────────────────────────
+  const parseChatItem = (ch: any): EvoChat | null => {
     const id = ch.id || ch.remoteJid || ch.jid || ''
-    if (!id || (!id.includes('@s.whatsapp.net') && !id.includes('@g.us'))) return null
-    if (id.includes('@g.us')) return null // ignorar grupos
+    if (!id.includes('@s.whatsapp.net')) return null // ignorar grupos e outros
 
-    // Extrair lastMessage de múltiplos formatos da API
+    // lastMessage pode vir em vários formatos dependendo da versão da API
     const lm = ch.lastMessage || ch.last_message || null
     const lastMsgNode = lm?.message || lm?.msg || lm || null
     const lastMessage = lastMsgNode?.conversation
       || lastMsgNode?.extendedTextMessage?.text
       || lastMsgNode?.imageMessage?.caption
       || lastMsgNode?.content
-      || ch.lastMsgText
-      || ''
+      || ch.lastMsgText || ''
 
     const rawTs = lm?.messageTimestamp || lm?.timestamp || ch.updatedAt || ch.updated_at
     const lastTimestamp = rawTs
@@ -238,93 +215,136 @@ export const useEvolution = () => {
 
     return {
       id,
-      name: ch.name || ch.pushName || ch.verifiedName || id.split('@')[0],
+      name:          ch.name || ch.pushName || ch.verifiedName || id.split('@')[0],
       lastMessage,
       lastTimestamp,
-      unreadCount: ch.unreadCount || ch.unread_count || 0
+      unreadCount:   ch.unreadCount || ch.unread_count || 0
     }
   }
 
-  // ── Buscar lista de chats — tenta múltiplos endpoints/formatos ───────────
+  // ── POST /chat/findChats/{instance} — lista todos os chats ───────────────
+  // body: { where: {} } para todos | { where: { id: "..." } } para um específico
   const fetchChats = async (): Promise<EvoChat[]> => {
     const c = await makeClient()
     if (!c) return []
 
-    // Conforme documentação oficial e issues do GitHub:
-    // GET /chat/findChats/{instance} com body {} é o formato correcto
-    const attempts = [
-      // Formato documentado no GitHub issue (GET com data body)
-      () => c.http.request({ method: 'get', url: `/chat/findChats/${c.instance}`, data: {} }),
-      // POST alternativo
-      () => c.http.post(`/chat/findChats/${c.instance}`, {}),
-      // GET sem body
-      () => c.http.get(`/chat/findChats/${c.instance}`),
-      // Endpoint de contactos — fallback robusto
-      () => c.http.get(`/contact/findContacts/${c.instance}`),
-      () => c.http.post(`/contact/findContacts/${c.instance}`, { where: {} }),
+    // Dois formatos documentados: with/without where clause
+    const bodies = [
+      { where: {} },
+      {}
     ]
 
-    for (const attempt of attempts) {
+    for (const body of bodies) {
       try {
-        const res = await attempt()
-        const raw: any[] = Array.isArray(res.data)
-          ? res.data
-          : (res.data?.chats || res.data?.contacts || res.data?.data || [])
-
+        const res = await c.http.post(`/chat/findChats/${c.instance}`, body)
+        const raw = extractRecords(res.data)
         if (raw.length > 0) {
-          const parsed = raw.map(parseChatRaw).filter(Boolean) as EvoChat[]
+          const parsed = raw.map(parseChatItem).filter(Boolean) as EvoChat[]
           if (parsed.length > 0) {
-            console.log(`[EVO] fetchChats: ${parsed.length} chats`)
+            console.log(`[EVO] fetchChats: ${parsed.length} chats individuais`)
             return parsed
           }
         }
       } catch (e: any) {
-        // silencioso — tenta próximo formato
+        console.warn('[EVO] findChats falhou:', e?.response?.status, e?.message)
       }
     }
 
-    console.warn('[EVO] fetchChats: nenhum endpoint funcionou')
+    // Fallback: POST /chat/findContacts/{instance}
+    try {
+      const res = await c.http.post(`/chat/findContacts/${c.instance}`, { where: {} })
+      const raw = extractRecords(res.data)
+      if (raw.length > 0) {
+        const parsed = raw.map(parseChatItem).filter(Boolean) as EvoChat[]
+        if (parsed.length > 0) {
+          console.log(`[EVO] fetchChats via findContacts: ${parsed.length}`)
+          return parsed
+        }
+      }
+    } catch (e: any) {
+      console.warn('[EVO] findContacts falhou:', e?.response?.status, e?.message)
+    }
+
     return []
   }
 
-  // ── Enviar mensagem de texto ─────────────────────────────────────────────
+  // ── POST /chat/findMessages/{instance} — histórico de 1 contacto ─────────
+  // body: { where: { key: { remoteJid: "..." } }, limit: N }
+  const fetchHistory = async (remoteJid: string, limit = 80): Promise<EvoMessage[]> => {
+    const c = await makeClient()
+    if (!c) return []
+
+    // Garantir formato JID correcto: 258XXXXXXXXX@s.whatsapp.net
+    const digits = String(remoteJid).replace(/\D/g, '').replace(/@.*$/, '')
+    const jid = digits + '@s.whatsapp.net'
+
+    // Corpo correcto conforme documentação oficial
+    const body = {
+      where: { key: { remoteJid: jid } },
+      limit
+    }
+
+    try {
+      const res = await c.http.post(`/chat/findMessages/${c.instance}`, body)
+      const raw = extractRecords(res.data)
+      if (raw.length > 0) {
+        const parsed = raw.map(parseRecord).filter(Boolean) as EvoMessage[]
+        console.log(`[EVO] fetchHistory ${jid}: ${parsed.length} msgs (${parsed.filter(m => !m.fromMe).length} recebidas)`)
+        return parsed
+      }
+    } catch (e: any) {
+      console.warn('[EVO] findMessages falhou:', e?.response?.status, e?.message)
+    }
+
+    return []
+  }
+
+  // ── Sidebar: chats + última mensagem de cada um ───────────────────────────
+  // Usa findChats para obter lista completa; para last message usa os dados do chat
+  const fetchAllRecent = async (_limit = 200): Promise<EvoMessage[]> => {
+    const chats = await fetchChats()
+    if (chats.length === 0) return []
+
+    // Converter EvoChat → EvoMessage (formato esperado pelo loadChats)
+    return chats.map(ch => ({
+      evoId:     `sidebar_${ch.id}`,
+      remoteJid: ch.id,
+      fromMe:    false,
+      content:   ch.lastMessage || '',
+      type:      'text' as const,
+      timestamp: ch.lastTimestamp || Date.now(),
+      status:    'DELIVERY_ACK',
+      pushName:  ch.name
+    }))
+  }
+
+  // ── POST /message/sendText/{instance} ────────────────────────────────────
   const sendText = async (rawPhone: string, text: string, quotedId?: string) => {
     const c = await makeClient()
     if (!c) throw new Error('Evolution não configurado')
 
     const number = formatPhone(rawPhone)
 
-    // Tentar formato v2 primeiro, depois formato v1
+    // v2 usa textMessage: { text }, v1 usa text directamente
     const payloads = [
-      // Evolution API v2
-      {
-        number,
-        textMessage: { text },
-        ...(quotedId ? { quoted: { key: { id: quotedId } } } : {})
-      },
-      // Evolution API v1 / compatibilidade
-      {
-        number,
-        text,
-        ...(quotedId ? { quoted: { key: { id: quotedId } } } : {})
-      }
+      { number, textMessage: { text }, ...(quotedId ? { quoted: { key: { id: quotedId } } } : {}) },
+      { number, text,                  ...(quotedId ? { quoted: { key: { id: quotedId } } } : {}) }
     ]
 
     let lastError: any
     for (const payload of payloads) {
       try {
         const res = await c.http.post(`/message/sendText/${c.instance}`, payload)
-        console.log(`[EVO] sendText OK para ${number}`)
+        console.log(`[EVO] sendText OK → ${number}`)
         return res.data
       } catch (e: any) {
         lastError = e
-        console.warn(`[EVO] sendText tentativa falhou:`, e?.message)
       }
     }
     throw lastError
   }
 
-  // ── Enviar media ─────────────────────────────────────────────────────────
+  // ── POST /message/sendMedia/{instance} ───────────────────────────────────
   const sendMedia = async (rawPhone: string, opts: {
     type: 'image' | 'audio' | 'video' | 'document'
     base64: string
@@ -337,19 +357,19 @@ export const useEvolution = () => {
     if (!c) throw new Error('Evolution não configurado')
     const cleanBase64 = opts.base64.includes(',') ? opts.base64.split(',')[1] : opts.base64
     const payload: any = {
-      number: formatPhone(rawPhone),
+      number:    formatPhone(rawPhone),
       mediatype: opts.type,
-      mimetype: opts.mimeType,
-      media: cleanBase64,
-      fileName: opts.filename,
-      caption: opts.caption || ''
+      mimetype:  opts.mimeType,
+      media:     cleanBase64,
+      fileName:  opts.filename,
+      caption:   opts.caption || ''
     }
     if (opts.quotedId) payload.quoted = { key: { id: opts.quotedId } }
     const res = await c.http.post(`/message/sendMedia/${c.instance}`, payload)
     return res.data
   }
 
-  // ── Apagar mensagem ──────────────────────────────────────────────────────
+  // ── DELETE /message/delete/{instance} ────────────────────────────────────
   const deleteMessage = async (messageId: string) => {
     const c = await makeClient()
     if (!c) throw new Error('Evolution não configurado')
@@ -359,18 +379,13 @@ export const useEvolution = () => {
     return res.data
   }
 
-  // ── Configurar webhook ───────────────────────────────────────────────────
+  // ── POST /webhook/set/{instance} — configurar webhook ────────────────────
   const configureWebhook = async (webhookUrl: string) => {
     const c = await makeClient()
     if (!c) throw new Error('Evolution não configurado')
 
     const events = ['MESSAGES_UPSERT', 'MESSAGES_UPDATE', 'MESSAGES_SET', 'SEND_MESSAGE']
-
-    // Tentar ambos os endpoints conhecidos
-    const endpoints = [
-      `/webhook/set/${c.instance}`,
-      `/instance/setWebhook/${c.instance}`
-    ]
+    const endpoints = [`/webhook/set/${c.instance}`, `/instance/setWebhook/${c.instance}`]
 
     let lastErr: any
     for (const ep of endpoints) {
@@ -378,65 +393,16 @@ export const useEvolution = () => {
         const res = await c.http.post(ep, { url: webhookUrl, enabled: true, events })
         console.log(`[EVO] Webhook configurado via ${ep}`)
         return res.data
-      } catch (e) {
-        lastErr = e
-      }
+      } catch (e) { lastErr = e }
     }
     throw lastErr
   }
 
-  // ── Buscar mensagens recentes de TODOS os JIDs (para popular sidebar) ───────
-  // Estratégia: primeiro tenta findMessages global, depois usa fetchChats como fallback
-  const fetchAllRecent = async (limit = 200): Promise<EvoMessage[]> => {
-    const c = await makeClient()
-    if (!c) return []
-
-    // Tentativa 1: findMessages sem filtro de JID (retorna global)
-    const globalAttempts = [
-      () => c.http.post(`/chat/findMessages/${c.instance}`, { where: {}, limit }),
-      () => c.http.post(`/chat/findMessages/${c.instance}`, { limit }),
-    ]
-
-    for (const attempt of globalAttempts) {
-      try {
-        const res = await attempt()
-        const data = res.data
-        const raw: any[] = data?.messages?.records || data?.messages || data?.records || (Array.isArray(data) ? data : [])
-        if (Array.isArray(raw) && raw.length > 0) {
-          const parsed = raw.map(parseRecord).filter(Boolean) as EvoMessage[]
-          const uniqueJids = new Set(parsed.map(m => m.remoteJid)).size
-          console.log(`[EVO] fetchAllRecent global: ${parsed.length} msgs de ${uniqueJids} JIDs`)
-          if (uniqueJids > 1) return parsed // bom — múltiplos JIDs
-        }
-      } catch (_) {}
-    }
-
-    // Tentativa 2: usar fetchChats para obter JIDs e simular mensagens de sidebar
-    // (não temos o conteúdo completo mas temos o suficiente para a lista)
-    const chats = await fetchChats()
-    if (chats.length > 0) {
-      console.log(`[EVO] fetchAllRecent via fetchChats: ${chats.length} chats`)
-      // Converter EvoChat para EvoMessage fake (só para popular a sidebar)
-      return chats.map(ch => ({
-        evoId: `chat_${ch.id}`,
-        remoteJid: ch.id,
-        fromMe: false,
-        content: ch.lastMessage || '',
-        type: 'text' as const,
-        timestamp: ch.lastTimestamp || Date.now(),
-        status: 'DELIVERY_ACK',
-        pushName: ch.name
-      }))
-    }
-
-    return []
-  }
-
   return {
     formatPhone,
+    fetchChats,
     fetchHistory,
     fetchAllRecent,
-    fetchChats,
     sendText,
     sendMedia,
     deleteMessage,
