@@ -272,58 +272,70 @@ export const useEvolution = () => {
   }
 
   // ── POST /chat/findMessages/{instance} — histórico de 1 contacto ─────────
-  // NOTA: o filtro remoteJid do Evolution tem bugs documentados (issue #1632).
-  // Estratégia: tentar com filtro (ambos formatos JID), fazer filtragem no cliente.
-  const fetchHistory = async (remoteJid: string, limit = 500): Promise<EvoMessage[]> => {
+  // Bug documentado (issue #1632): filtro remoteJid no servidor não é fiável.
+  // Solução: buscar sem filtro (todas as mensagens) e filtrar 100% no cliente.
+  const fetchHistory = async (remoteJid: string): Promise<EvoMessage[]> => {
     const c = await makeClient()
     if (!c) return []
 
-    // Construir os dois formatos possíveis de JID (com e sem prefixo 258)
+    // Número local sem prefixo 258 (para comparação robusta)
     const rawDigits = String(remoteJid).replace(/\D/g, '').replace(/@.*$/, '')
-    // Remover 258 para obter número local de 9 dígitos
-    const localDigits = rawDigits.startsWith('258') && rawDigits.length > 9 ? rawDigits.slice(3) : rawDigits
-    const jidWith    = '258' + localDigits + '@s.whatsapp.net' // ex: 258855253617@s.whatsapp.net
-    const jidWithout = localDigits + '@s.whatsapp.net'          // ex: 855253617@s.whatsapp.net
+    const localDigits = rawDigits.startsWith('258') && rawDigits.length > 9
+      ? rawDigits.slice(3) : rawDigits
 
-    const allRaw: any[] = []
+    const jidWith    = '258' + localDigits + '@s.whatsapp.net'
+    const jidWithout = localDigits + '@s.whatsapp.net'
 
-    // Tentar ambos os formatos de JID
+    let allRaw: any[] = []
+
+    // Tentativa 1: com filtro específico (mais eficiente — funciona em alguns servidores)
     for (const jid of [jidWith, jidWithout]) {
-      for (const body of [
-        { where: { key: { remoteJid: jid } }, limit },
-        { where: { remoteJid: jid },          limit },
-      ]) {
-        try {
-          const res = await c.http.post(`/chat/findMessages/${c.instance}`, body)
-          const raw = extractRecords(res.data)
-          if (raw.length > 0) {
-            allRaw.push(...raw)
-            break // formato funcionou para este JID, não tentar o próximo body
-          }
-        } catch (_) {}
-      }
+      try {
+        const res = await c.http.post(`/chat/findMessages/${c.instance}`, {
+          where: { key: { remoteJid: jid } },
+          limit: 100
+        })
+        const raw = extractRecords(res.data)
+        allRaw.push(...raw)
+      } catch (_) {}
+    }
+
+    // Tentativa 2: sem filtro — busca TODAS as mensagens e filtra no cliente
+    // (workaround oficial para issue #1632)
+    if (allRaw.length === 0) {
+      try {
+        const res = await c.http.post(`/chat/findMessages/${c.instance}`, { limit: 500 })
+        allRaw = extractRecords(res.data)
+      } catch (_) {}
     }
 
     if (allRaw.length === 0) return []
 
-    // Parsear e deduplicar por ID da mensagem
+    // Filtrar no cliente: só mensagens deste número (qualquer formato de JID)
     const seen = new Set<string>()
     const parsed: EvoMessage[] = []
+
     for (const r of allRaw) {
       const m = parseRecord(r)
       if (!m || !m.evoId || seen.has(m.evoId)) continue
-      // Filtro client-side: garantir que a mensagem é deste contacto
-      const msgDigits = m.remoteJid.replace(/\D/g, '').replace(/@.*$/, '')
-      const msgLocal = msgDigits.startsWith('258') && msgDigits.length > 9 ? msgDigits.slice(3) : msgDigits
-      if (msgLocal !== localDigits) continue // mensagem de outro JID — ignorar
+
+      // Normalizar JID da mensagem e comparar com o número alvo
+      const msgRaw = m.remoteJid.replace(/\D/g, '').replace(/@.*$/, '')
+      const msgLocal = msgRaw.startsWith('258') && msgRaw.length > 9 ? msgRaw.slice(3) : msgRaw
+      if (msgLocal !== localDigits) continue
+
       seen.add(m.evoId)
       parsed.push(m)
     }
 
-    // Ordenar por timestamp ASC (mais antigas primeiro) para exibição correcta
+    // Ordenar ASC (mais antigas → mais recentes) para exibição correcta
     parsed.sort((a, b) => a.timestamp - b.timestamp)
 
-    console.log(`[EVO] fetchHistory ${jidWith}: ${parsed.length} msgs (${parsed.filter(m => !m.fromMe).length} recebidas)`)
+    const received = parsed.filter(m => !m.fromMe)
+    console.log(`[EVO] fetchHistory ${jidWith}: ${parsed.length} msgs | ↑${parsed.length - received.length} enviadas | ↓${received.length} recebidas`)
+    if (received.length > 0) {
+      console.log('[EVO] Amostra recebidas:', received.slice(-3).map(m => ({ content: m.content, type: m.type, ts: new Date(m.timestamp).toLocaleTimeString() })))
+    }
     return parsed
   }
 

@@ -116,7 +116,6 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
-import { useSupabaseClient } from '#imports'
 import { useContactStore } from '~/stores/contacts'
 import { useMessageStore } from '~/stores/messages'
 import { useApi } from '~/composables/useApi'
@@ -132,9 +131,8 @@ const agentSignature = ref('')
 const activeContact = ref<any | null>(null)
 const sending = ref(false)
 const chats = ref<any[]>([])                  // lista de conversas (Evolution)
-let pollTimer: any = null                       // polling do chat activo
-let chatsPollTimer: any = null                  // polling da lista de chats
-let realtimeChannel: any = null                 // Supabase Realtime
+let pollTimer: any = null                       // polling do chat activo (Evolution)
+let chatsPollTimer: any = null                  // polling da lista de chats (Evolution)
 
 // Search modal
 const showSearchModal = ref(false)
@@ -185,7 +183,7 @@ const canonicalJid = (jid: string): string => {
   return phone + '@s.whatsapp.net'
 }
 
-// ── Carregar chats do Supabase (via webhook) + match Lojou ───────────────────
+// ── Carregar chats do Evolution + match Lojou ────────────────────────────────
 // ── Sidebar: carregar conversas DIRECTAMENTE do Evolution ────────────────────
 const loadChats = async () => {
   try {
@@ -285,14 +283,13 @@ const selectContact = async (contact: any) => {
   if (!jid) return
 
   messagesStore.clearJid(jid)
-  await loadMessages(jid) // carga inicial do Evolution
+  await loadMessages(jid)
 
-  // Poll a cada 15s: recarrega mensagens (Evolution como fonte)
-  // Não é spam porque fetchHistory agora tem limit=500 e filtra no cliente
+  // Poll a cada 8s — detecta novas mensagens recebidas directamente do Evolution
   pollTimer = setInterval(async () => {
     if (!activeContact.value) return
     await loadMessages(activeContact.value.remote_jid)
-  }, 15000)
+  }, 8000)
 }
 
 // ── Computed ──────────────────────────────────────────────────────────────────
@@ -412,90 +409,23 @@ onMounted(async () => {
     agentSignature.value = localStorage.getItem('lojou_agent_signature') || ''
   }
 
-  // 1. Carregar contactos Lojou primeiro (necessário para o match na sidebar)
+  // 1. Contactos Lojou (para match de nomes)
   if (contactsStore.contacts.length === 0) {
     await contactsStore.fetchContacts({ is_paginate: true, per_page: 100, page: 1 })
   }
 
-  // 2. Carregar chats da Evolution (agora com match Lojou)
+  // 2. Carregar sidebar via Evolution directamente
   await loadChats()
 
-  // 3. Polling da lista de chats a cada 15s
+  // 3. Polling da sidebar a cada 20s
   chatsPollTimer = setInterval(async () => {
     try { await loadChats() } catch (e) { console.warn('[CHATS POLL]', e) }
-  }, 15000)
-
-  // 4. Supabase Realtime — recebe mensagens em tempo real via webhook
-  const supabase = useSupabaseClient()
-  realtimeChannel = supabase
-    .channel('messages-rt')
-    .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages' }, (payload: any) => {
-      const m = payload.new
-      if (!m?.remote_jid || !m?.id) return
-
-      const jid = canonicalJid(m.remote_jid) // normalizar JID
-      const phoneKey = normalizePhone(jid.split('@')[0])
-
-      // Se é do chat activo, adicionar ao store in-memory
-      if (activeContact.value) {
-        const activePhone = normalizePhone(activeContact.value.remote_jid?.split('@')[0] || '')
-        if (activePhone === phoneKey) {
-          messagesStore.upsertIntoStore({
-            id: m.message_id || m.id,
-            remote_jid: activeContact.value.remote_jid,
-            content: m.content || '',
-            status: m.status || 'delivered',
-            timestamp: m.timestamp || new Date().toISOString(),
-            is_outgoing: Boolean(m.is_outgoing),
-            type: m.type || 'text',
-            mediaUrl: m.media_url,
-            mimeType: m.mime_type,
-            caption: m.caption
-          })
-        }
-      }
-
-      // Actualizar sidebar — encontrar por número normalizado
-      const chatIdx = chats.value.findIndex(c =>
-        normalizePhone(c.remote_jid?.split('@')[0] || '') === phoneKey
-      )
-      if (chatIdx >= 0) {
-        // Chat já existe → actualizar última mensagem e subir ao topo
-        chats.value[chatIdx].lastMessage = m.content || ''
-        chats.value[chatIdx].lastMessageTime = m.timestamp || new Date().toISOString()
-        const updated = chats.value.splice(chatIdx, 1)[0]
-        chats.value.unshift(updated)
-      } else {
-        // Chat NOVO (número nunca visto) → adicionar ao topo IMEDIATAMENTE
-        // Não chamar loadChats() — é lento. Usar os dados do próprio evento.
-        const pushName = m.metadata?.pushName || m.push_name || null
-        const lojou = findLojouUser(phoneKey)
-        chats.value.unshift({
-          id: jid,
-          remote_jid: jid,
-          name: lojou
-            ? (lojou.full_name || lojou.firstname || lojou.name)
-            : (pushName || phoneKey),
-          phone_number: jid.split('@')[0],
-          lastMessage: m.content || '',
-          lastMessageTime: m.timestamp || new Date().toISOString(),
-          user_id: lojou?.id || null,
-          users: lojou ? {
-            id: lojou.id,
-            name: lojou.full_name || lojou.firstname || lojou.name,
-            balance: lojou.balance || 0,
-            status: lojou.status || 'active'
-          } : null
-        })
-      }
-    })
-    .subscribe()
+  }, 20000)
 })
 
 onUnmounted(() => {
   clearInterval(pollTimer)
   clearInterval(chatsPollTimer)
-  if (realtimeChannel) realtimeChannel.unsubscribe()
 })
 
 // ── Search Modal ──────────────────────────────────────────────────────────────
